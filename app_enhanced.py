@@ -1,0 +1,488 @@
+# -*- coding: utf-8 -*-
+import streamlit as st
+import pandas as pd
+import numpy as np
+import os, json
+from urllib.parse import quote, unquote
+
+# -------------------------------
+# Page Config
+# -------------------------------
+st.set_page_config(page_title="고객 이탈 위험 대시보드 (Enhanced)", layout="wide")
+
+# 상세 페이지 라우트 (pages/01_Customer_Detail.py → /Customer_Detail)
+DETAIL_PAGE_SLUG = "Customer_Detail"  # 상세 링크에서 사용
+
+# -------------------------------
+# Query-param helpers (new/old Streamlit 모두 지원)
+# -------------------------------
+def qp_get(name: str):
+    """Get query param for both new (st.query_params) and old (experimental_get_) APIs."""
+    try:
+        v = st.query_params.get(name)  # Streamlit >= 1.30+
+    except Exception:
+        v = st.experimental_get_query_params().get(name)  # older
+    if isinstance(v, list):
+        v = v[0] if v else None
+    return v
+
+def qp_set(**kwargs):
+    """Set query params for both new and old APIs."""
+    try:
+        for k, v in kwargs.items():
+            st.query_params[k] = v
+    except Exception:
+        st.experimental_set_query_params(**kwargs)
+
+# -------------------------------
+# 화면 표시용 한글 라벨 맵(표시 전용; 내부 컬럼명은 그대로 사용)
+# -------------------------------
+# 화면 표시용 한글 라벨 맵(표시 전용; 내부 컬럼명은 그대로 사용)
+KOR_COL = {
+    "CustomerID_clean": "고객ID",
+    "GenderLabel": "성별",
+    "ChurnRiskScore": "이탈위험점수",
+    "IF_AnomalyScore": "패턴이탈지수(IF)",
+    "AE_ReconError": "정상패턴차이(AE)",
+    "PurchaseFrequency": "구매빈도",
+    "CSFrequency": "상담빈도",
+    "AverageSatisfactionScore": "평균만족도",
+    "NegativeExperienceIndex": "부정경험지수",
+    "EmailEngagementRate": "이메일참여율",
+    "TotalEngagementScore": "총참여점수",
+    "AvgPurchaseInterval": "평균구매간격",
+    "TotalPurchases": "총구매수",
+    "AverageOrderValue": "평균주문금액",
+    "CustomerLifetimeValue": "고객생애가치",
+    "MobileAppUsage": "모바일앱사용",
+    "CustomerServiceInteractions": "고객센터상담수",
+    "Age": "나이",
+    "RepeatAndPremiumFlag": "리피트/프리미엄",
+}
+def rename_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    return df.rename(columns={c: KOR_COL.get(c, c) for c in df.columns})
+
+# -------------------------------
+# Gender standardization helpers
+# -------------------------------
+DEFAULT_CODE_TO_LABEL_KO = {
+    1: "여성",
+    3: "남성",
+    5: "응답거부",
+    4: "기타/미상",
+    2: "남성",
+    0: "여성",
+}
+
+def _normalize_gender_text_to_label_ko(x) -> str:
+    """원본 문자열 성별을 한국어 라벨로 표준화."""
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return "미상"
+    s = str(x).strip().lower()
+    if s in {"m", "male", "man", "남", "남성"}:
+        return "남성"
+    if s in {"f", "female", "woman", "여", "여성"}:
+        return "여성"
+    if s in {"prefer not to say", "decline to state", "no answer"}:
+        return "응답거부"
+    if s in {"non-binary", "nonbinary", "genderqueer", "agender", "nb"}:
+        return "기타"
+    if s in {"other", "기타"}:
+        return "기타"
+    return "기타"  # 정의 불명 문자열은 기타로
+
+def ensure_gender_label(
+    df_hybrid: pd.DataFrame,
+    original_csv_path: str = "ecommerce_customer_data.csv",
+    code_map_path: str = "gender_code_map.json",
+) -> pd.DataFrame:
+    """
+    하이브리드 df에 GenderLabel 보장:
+      1) 원본 CSV(ecommerce_customer_data.csv)의 Gender 문자열을 CustomerID로 조인해 표준 라벨 우선 사용
+      2) 남은 결측은 숫자 코드→라벨 매핑으로 보완
+    """
+    df = df_hybrid.copy()
+
+    # 1) 원본 조인 (CustomerID 기준)
+    if os.path.exists(original_csv_path):
+        try:
+            raw = pd.read_csv(original_csv_path, usecols=["CustomerID", "Gender"])
+            raw["GenderLabel_from_raw"] = raw["Gender"].map(_normalize_gender_text_to_label_ko)
+            df = df.merge(raw[["CustomerID", "GenderLabel_from_raw"]], on="CustomerID", how="left")
+        except Exception:
+            df["GenderLabel_from_raw"] = np.nan
+    else:
+        df["GenderLabel_from_raw"] = np.nan
+
+    # 2) 코드→라벨 매핑 로드(없으면 기본)
+    code_map = DEFAULT_CODE_TO_LABEL_KO.copy()
+    if os.path.exists(code_map_path):
+        try:
+            with open(code_map_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)  # {"1":"여성", "3":"남성", ...}
+                code_map.update({int(k): v for k, v in loaded.items()})
+        except Exception:
+            pass
+
+    # 3) 최종 GenderLabel 구성
+    if "Gender" in df.columns:
+        label_from_code = df["Gender"].map(code_map)
+    else:
+        label_from_code = pd.Series(index=df.index, dtype="object")
+
+    df["GenderLabel"] = df["GenderLabel_from_raw"].fillna(label_from_code)
+    df.drop(columns=["GenderLabel_from_raw"], inplace=True)
+    df["GenderLabel"] = df["GenderLabel"].fillna("미상")
+
+    return df
+
+# -------------------------------
+# Data Loaders
+# -------------------------------
+@st.cache_data(show_spinner=False)
+def load_main():
+    df = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
+
+    # CustomerID 클린 컬럼 생성: 공백/문자열 'nan'/'None'/'null' 등 제거
+    if "CustomerID" in df.columns:
+        def _clean_id(x):
+            if pd.isna(x):
+                return np.nan
+            s = str(x).strip()
+            return np.nan if (s == "" or s.lower() in {"nan", "none", "nat", "null"}) else s
+        df["CustomerID_clean"] = df["CustomerID"].map(_clean_id)
+
+    # 성별 라벨 보장(원본 조인 + 코드 보완)
+    df = ensure_gender_label(df)
+
+    return df
+
+@st.cache_data(show_spinner=False)
+def load_featured():
+    try:
+        dff = pd.read_csv("ecommerce_customer_data_featured.csv")
+        if "CustomerID" in dff.columns:
+            def _clean_id(x):
+                if pd.isna(x):
+                    return np.nan
+                s = str(x).strip()
+                return np.nan if (s == "" or s.lower() in {"nan", "none", "nat", "null"}) else s
+            dff["CustomerID_clean"] = dff["CustomerID"].map(_clean_id)
+        return dff
+    except Exception:
+        return None
+
+df = load_main()
+dff = load_featured()
+
+# -------------------------------
+# Helpers
+# -------------------------------
+def exists(col): 
+    return col in df.columns
+
+def col_or_none(cols):
+    return [c for c in cols if c in df.columns]
+
+def get_p99(series: pd.Series) -> float:
+    try:
+        p = float(series.quantile(0.99))
+        return p if p > 0 else 1.0
+    except Exception:
+        return 1.0
+
+# -------------------------------
+# KPI 숫자 클릭 가능 CSS (모양은 그대로, 숫자 위에 투명 링크 오버레이)
+# -------------------------------
+st.markdown("""
+<style>
+.kpi-link { position: relative; display:block; top:-64px; height:56px; margin-bottom:-56px;
+            z-index:100; cursor:pointer; }
+.kpi-link:hover { background: rgba(0,0,0,0.02); }
+</style>
+""", unsafe_allow_html=True)
+
+# -------------------------------
+# 사이드바: 도움말 / 전역 필터 / 임계값
+# -------------------------------
+with st.sidebar:
+    st.header("❓ 도움말 / 사용법")
+    with st.expander("전역 필터 사용법"):
+        st.markdown("""
+        - **나이**: 범위를 좁힐수록 해당 연령대만 분석됩니다.
+        - **성별**: 원본 문자열을 표준화한 `GenderLabel`(남성/여성/기타/응답거부/미상) 기준으로 필터합니다.
+        - **리피트/프리미엄 플래그**: 1(예)/0(아니오)로 세분화합니다.
+        """)
+    with st.expander("임계값 튜닝이란?"):
+        st.markdown("""
+        - 모델 점수(IF: `IF_AnomalyScore`, AE: `AE_ReconError`)가 **임계값 이상**이면 '이탈'로 판단합니다.
+        - **동적 임계값 사용**을 켜면 슬라이더로 임계값을 직접 조정합니다.
+          - 슬라이더를 **낮추면** 더 많은 고객이 이탈로 **표시**됩니다(재현율↑, 정밀도↓).
+          - 슬라이더를 **높이면** 더 **엄격**해집니다(정밀도↑, 재현율↓).
+        - 이 모드에서는 `Both_ChurnFlag_dyn`(IF & AE 모두 만족)이 고신뢰 위험군으로 사용됩니다.
+        """)
+
+with st.sidebar:
+    st.header("🔎 전역 필터")
+
+    # Age
+    if exists("Age"):
+        age_min, age_max = int(np.nanmin(df["Age"])), int(np.nanmax(df["Age"]))
+        sel_age = st.slider("나이", min_value=age_min, max_value=age_max, value=(age_min, age_max))
+    else:
+        sel_age = None
+
+    # Gender (표준 라벨 기반)
+    if exists("GenderLabel"):
+        gender_labels = sorted(pd.Series(df["GenderLabel"].dropna().unique()).tolist())
+        sel_gender_labels = st.multiselect("성별", gender_labels, default=[])
+    else:
+        sel_gender_labels = []
+
+    # Premium-like flag
+    premium_flag_col = "RepeatAndPremiumFlag" if exists("RepeatAndPremiumFlag") else None
+    if premium_flag_col:
+        premium_opt = st.selectbox("리피트/프리미엄", ["전체", "예(1)", "아니오(0)"])
+    else:
+        premium_opt = "전체"
+
+    st.markdown("---")
+    st.subheader("⚙️ 임계값 튜닝(실험)")
+    use_dynamic = st.toggle("동적 임계값 사용", value=False)
+
+    if use_dynamic:
+        if exists("IF_AnomalyScore"):
+            if_thr_default = float(df["IF_AnomalyScore"].quantile(0.95))
+            if_thr_min = float(df["IF_AnomalyScore"].quantile(0.90))
+            if_thr_max = float(df["IF_AnomalyScore"].quantile(0.99))
+            if_thr = st.slider("IF 임계값", min_value=float(if_thr_min), max_value=float(if_thr_max), value=float(if_thr_default))
+        else:
+            if_thr = None
+
+        if exists("AE_ReconError"):
+            ae_thr_default = float(df["AE_ReconError"].quantile(0.95))
+            ae_thr_min = float(df["AE_ReconError"].quantile(0.90))
+            ae_thr_max = float(df["AE_ReconError"].quantile(0.99))
+            ae_thr = st.slider("AE 임계값", min_value=float(ae_thr_min), max_value=float(ae_thr_max), value=float(ae_thr_default))
+        else:
+            ae_thr = None
+    else:
+        if_thr = None
+        ae_thr = None
+    
+    # 👉 VIP 인사이트 빠른 이동 (사이드바 하단)
+with st.sidebar:
+    st.markdown("---")
+    try:
+        st.page_link("pages/03_VIP_Insights.py", label="👑 VIP 인사이트 열기", icon="👑")
+    except Exception:
+        # Streamlit 버전에 따라 page_link 미지원 시 URL로 이동
+        st.markdown("[👑 VIP 인사이트 열기](/VIP_Insights)")
+
+# 👉 리스트 페이지가 동일 조건을 사용하도록 세션에 저장
+st.session_state["sel_age"] = sel_age
+st.session_state["sel_gender_labels"] = sel_gender_labels
+st.session_state["premium_opt"] = premium_opt
+st.session_state["use_dynamic"] = use_dynamic
+st.session_state["if_thr"] = if_thr
+st.session_state["ae_thr"] = ae_thr
+
+# -------------------------------
+# 필터 적용
+# -------------------------------
+filtered = df.copy()
+if sel_age:
+    filtered = filtered[(filtered["Age"] >= sel_age[0]) & (filtered["Age"] <= sel_age[1])]
+
+# 성별 라벨로 필터
+if sel_gender_labels:
+    filtered = filtered[filtered["GenderLabel"].isin(sel_gender_labels)]
+
+if premium_flag_col and premium_opt != "전체":
+    filtered = filtered[filtered[premium_flag_col] == (1 if premium_opt.startswith("예") else 0)]
+
+# 동적 플래그
+if use_dynamic and exists("IF_AnomalyScore") and exists("AE_ReconError"):
+    filtered = filtered.copy()
+    filtered["IF_ChurnFlag_dyn"] = (filtered["IF_AnomalyScore"] >= if_thr).astype(int)
+    filtered["AE_ChurnFlag_dyn"] = (filtered["AE_ReconError"] >= ae_thr).astype(int)
+    filtered["Both_ChurnFlag_dyn"] = (filtered["IF_ChurnFlag_dyn"] & filtered["AE_ChurnFlag_dyn"]).astype(int)
+    flag_col = "Both_ChurnFlag_dyn"
+else:
+    flag_col = "Both_ChurnFlag" if exists("Both_ChurnFlag") else None
+
+# -------------------------------
+# Layout
+# -------------------------------
+st.title("🧭 고객 이탈 위험 대시보드")
+missing_cnt = int(df.get("CustomerID_clean", pd.Series([np.nan]*len(df))).isna().sum()) if "CustomerID_clean" in df.columns else 0
+st.caption(f"🧹 CustomerID 결측/무효: {missing_cnt} / {len(df):,}")
+
+tabs = st.tabs(["📊 개요", "🔍 탐색/고객 조회"])
+
+with tabs[0]:
+    # KPIs (포맷 그대로 유지)
+    col1, col2, col3, col4 = st.columns(4)
+    total_customers = len(filtered)
+    churn_if = int(filtered["IF_ChurnFlag"].sum()) if exists("IF_ChurnFlag") else 0
+    churn_ae = int(filtered["AE_ChurnFlag"].sum()) if exists("AE_ChurnFlag") else 0
+    churn_both = int(filtered[flag_col].sum()) if flag_col else 0
+
+    col1.metric("총 고객 수(필터 반영)", f"{total_customers:,}")
+    with col2:
+        st.metric("IsolationForest 이탈 고객 수", f"{churn_if:,}")
+        # 숫자 위에 투명 오버레이(손 커서) → 별도 페이지로 이동
+        st.markdown("<a class='kpi-link' href='/Risky_List?src=if' title='IF 이탈 고객 목록'></a>", unsafe_allow_html=True)
+    with col3:
+        st.metric("Autoencoder 이탈 고객 수", f"{churn_ae:,}")
+        st.markdown("<a class='kpi-link' href='/Risky_List?src=ae' title='AE 이탈 고객 목록'></a>", unsafe_allow_html=True)
+    with col4:
+        st.metric("공통 이탈 고객 (고신뢰군)", f"{churn_both:,} ({(churn_both/total_customers*100 if total_customers else 0):.2f}%)")
+        st.markdown("<a class='kpi-link' href='/Risky_List?src=both' title='고신뢰 이탈 고객 목록'></a>", unsafe_allow_html=True)
+
+    # 🔧 KPI-구분선-제목 사이 여백 조정 (줄을 위로, 제목과는 여백 확보)
+    st.markdown(
+        "<hr style='margin-top:8px; margin-bottom:22px; opacity:0.22;'>",
+        unsafe_allow_html=True
+    )
+
+    # 🚨 이탈 위험 고객 리스트 (포맷 유지 + 한글 라벨 + CSV)
+    st.subheader("🚨 이탈 위험 고객 리스트")
+    top_k = st.slider("리스트 크기", min_value=5, max_value=200, value=10, step=5)
+
+    list_df = filtered.copy()
+    if flag_col:
+        list_df = list_df[list_df[flag_col] == 1]
+
+    # 고객ID 없는 행 제거
+    if "CustomerID_clean" in list_df.columns:
+        list_df = list_df[list_df["CustomerID_clean"].notna()]
+    elif "CustomerID" in list_df.columns:
+        list_df = list_df[list_df["CustomerID"].notna()]
+
+    # 위험도 순 정렬
+    if "ChurnRiskScore" in list_df.columns:
+        list_df = list_df.sort_values("ChurnRiskScore", ascending=False)
+
+    cols_to_show = col_or_none([
+        "CustomerID_clean","GenderLabel","ChurnRiskScore","PurchaseFrequency","CSFrequency",
+        "AverageSatisfactionScore","NegativeExperienceIndex","EmailEngagementRate","TotalEngagementScore"
+    ])
+    risky_customers = list_df.head(top_k)[cols_to_show].copy()
+
+    if risky_customers.empty:
+        st.info("현재 조건에서 표시할 고객이 없습니다.")
+    else:
+        # 순위(헤더 없이) + 고객ID 링크
+        risky_customers.insert(0, "", np.arange(1, len(risky_customers) + 1))
+        risky_customers["고객ID"] = risky_customers["CustomerID_clean"].apply(
+            lambda cid: f"<a href='/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
+        )
+
+        # 화면 표시용 DF (CustomerID_clean 제거 + 한글 라벨)
+        display_df = risky_customers.drop(columns=["CustomerID_clean"], errors="ignore")
+        display_df = rename_for_display(display_df)
+        churn_label = KOR_COL.get("ChurnRiskScore", "ChurnRiskScore")  # "이탈위험점수"
+
+        # 표시 순서: 순위 → 고객ID → 나머지
+        display_cols = ["", "고객ID"] + [c for c in display_df.columns if c not in ("", "고객ID")]
+
+        # 포맷
+        fmt_map = {c: "{:.2f}" for c in [
+            churn_label, "구매빈도","상담빈도","평균만족도","부정경험지수","이메일참여율","총참여점수"
+        ] if c in display_df.columns}
+
+        styler = display_df[display_cols].style.format(fmt_map).hide(axis="index")
+
+        # 📌 표에 id 부여해서 길이/너비 CSS 제어
+        styler = styler.set_table_attributes('id="risky_table" class="dataframe"')
+
+        # Matplotlib이 있으면 background_gradient, 없으면 CSS 스타일
+        has_mpl = False
+        try:
+            import matplotlib as _mpl  # noqa: F401
+            has_mpl = True
+        except Exception:
+            has_mpl = False
+
+        if has_mpl and (churn_label in display_df.columns):
+            styler = styler.background_gradient(cmap="Reds", subset=[churn_label])
+        else:
+            def style_churn(series: pd.Series):
+                if series.name != churn_label:
+                    return [""] * len(series)
+                vals = pd.to_numeric(series, errors="coerce")
+                if vals.notna().any():
+                    vmin = float(vals.min(skipna=True)); vmax = float(vals.max(skipna=True))
+                else:
+                    vmin, vmax = 0.0, 1.0
+                rng = (vmax - vmin) if vmax > vmin else 1.0
+                alphas = 0.15 + 0.75 * (vals - vmin) / rng
+                alphas = alphas.clip(lower=0, upper=1).fillna(0)
+                return [f"background-color: rgba(255,0,0,{a:.2f})" for a in alphas]
+            if churn_label in display_df.columns:
+                styler = styler.apply(style_churn, axis=0)
+
+        # ✅ 표 길이(행 높이) & 너비 확장 CSS
+        st.markdown("""
+<style>
+#risky_table { width: 100% !important; table-layout: fixed; }
+#risky_table th, #risky_table td {
+  padding: 10px 12px !important;   /* 행 높이 조금 키움 */
+  line-height: 1.45;
+  vertical-align: middle;
+}
+#risky_table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+""", unsafe_allow_html=True)
+
+        st.markdown(styler.to_html(escape=False), unsafe_allow_html=True)
+
+        # ✅ CSV 다운로드 (대시보드 포맷 유지 + 버튼 유지)
+        export_df = display_df.copy()
+        export_df.rename(columns={"": "순위"}, inplace=True)
+        if "고객ID" in export_df.columns:
+            export_df.insert(1, "CustomerID", export_df["고객ID"].str.extract(r'>(.*?)<')[0])
+            export_df.drop(columns=["고객ID"], inplace=True)
+        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ 리스트 내려받기 (CSV)", data=csv_bytes,
+                           file_name="risky_customers.csv", mime="text/csv")
+
+    st.markdown("---")
+    # 부가 요약 (일부 피처) — 표 머리만 한글
+    if dff is not None:
+        st.subheader("📈 요약 통계 (일부 피처)")
+        sample_cols = [c for c in [
+            "Age","TotalPurchases","AverageOrderValue","CustomerLifetimeValue",
+            "EmailEngagementRate","MobileAppUsage","CustomerServiceInteractions",
+            "AverageSatisfactionScore","ChurnRiskScore"
+        ] if c in dff.columns]
+        if sample_cols:
+            desc = dff[sample_cols].describe().T
+            desc = rename_for_display(desc)
+            st.dataframe(desc, use_container_width=True)
+
+with tabs[1]:
+    st.subheader("고객 ID로 조회")
+    cid = st.text_input("CustomerID 입력", value="")
+    colA, colB = st.columns([1,1])
+    with colA:
+        if st.button("상세 페이지 열기"):
+            if cid:
+                page_href = f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}"
+                st.markdown(f"[👉 고객 상세 페이지로 이동]({page_href})")
+            else:
+                st.warning("CustomerID를 입력하세요.")
+
+    with colB:
+        if cid:
+            q = df[df.get("CustomerID_clean") == str(cid)]
+            if not q.empty and "ChurnRiskScore" in df.columns:
+                p99 = get_p99(df["ChurnRiskScore"])
+                risk = float(q.iloc[0]["ChurnRiskScore"]) / p99
+                risk = min(max(risk, 0.0), 1.0)
+                st.write("위험도(상대):")
+                st.progress(risk)
+                st.dataframe(rename_for_display(q.head(1)).T, use_container_width=True)
+            elif q.empty:
+                st.info("일치하는 고객이 없습니다.")

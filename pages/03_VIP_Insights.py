@@ -207,7 +207,7 @@ def recommend_tags(row, ref_df):
 # ---------------------------------------------------------------------
 # 설정 영역(접기/펼치기) — 화면 구성 유지
 # ---------------------------------------------------------------------
-with st.expander("🎯 VIP 정의", expanded=False):
+with st.expander("VIP 정의", expanded=False):
     colA, colB, colC = st.columns([1,1,1])
     with colA:
         clv_q = st.slider("CLV 기준 분위(상위 %)", min_value=70, max_value=99, value=90, step=1)
@@ -216,7 +216,7 @@ with st.expander("🎯 VIP 정의", expanded=False):
     with colC:
         logic = st.radio("VIP 판정 방식", ["AND (둘 다 충족)", "OR (둘 중 하나 충족)"], index=0, horizontal=True)
 
-with st.expander("🧪 후보 선정 방식", expanded=False):
+with st.expander("후보 선정 방식", expanded=False):
     col1, col2, col3, col4 = st.columns([1,1,1,1])
     with col1:
         mode = st.selectbox("선정 모드", ["threshold(임계값)", "topk(상위 N)"], index=0)

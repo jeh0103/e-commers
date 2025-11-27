@@ -146,7 +146,7 @@ if "RepeatAndPremiumFlag" in filtered.columns and premium_opt != "전체":
 # 상단 네비게이션
 # ---------------------------------------------------------------------
 try:
-    st.page_link("app_enhanced.py", label="🏠 대시보드로", icon="🏠")
+    st.page_link("app_enhanced.py", label="⬅️ 대시보드로", icon="🏠")
 except Exception:
     st.markdown("[🏠 대시보드로](/)")
 

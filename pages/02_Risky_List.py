@@ -28,6 +28,7 @@ KOR_COL = {
     "Age": "나이",
     "RepeatAndPremiumFlag": "리피트/프리미엄",
 }
+
 def rename_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={c: KOR_COL.get(c, c) for c in df.columns})
 
@@ -109,11 +110,15 @@ src = (src if isinstance(src, str) else src[0]).lower()
 
 # ===== 상단 네비 =====
 try:
-    st.page_link("app_enhanced.py", label="🏠 대시보드로", icon="🏠")
+    st.page_link("app_enhanced.py", label="⬅️ 대시보드로", icon="🏠")
 except Exception:
     st.markdown("[🏠 대시보드로](/)")
 
-TITLE = {"if":"IsolationForest 이탈 고객", "ae":"Autoencoder 이탈 고객", "both":"공통 이탈 고객(고신뢰군)"}
+TITLE = {
+    "if":   "IsolationForest 이탈 고객",
+    "ae":   "Autoencoder 이탈 고객",
+    "both": "공통 이탈 고객(고신뢰군)"
+}
 st.title(f"🗂️ {TITLE.get(src, '고객 리스트')}")
 
 # ===== 판단 기준/기본 설정 =====
@@ -123,20 +128,32 @@ if src == "if":
     subset = filtered[filtered.get(flag_col, 0) == 1] if flag_col in filtered.columns else filtered.copy()
     thr_value = float(if_thr) if (use_dynamic and if_thr is not None) else (
         float(filtered["IF_AnomalyScore"].quantile(0.95)) if "IF_AnomalyScore" in filtered.columns else None)
-    st.markdown("**판단 기준 안내**\n\n- Isolation Forest는 격리 깊이로 이상치 점수를 계산하며, 점수가 클수록 이탈 신호로 간주합니다.\n- 아래 목록은 해당 기준을 충족한 고객을 **위험도 순**으로 정렬해 보여줍니다.")
+    st.markdown(
+        "**판단 기준 안내**\n\n"
+        "- Isolation Forest는 격리 깊이로 이상치 점수를 계산하며, 점수가 클수록 이탈 신호로 간주합니다.\n"
+        "- 아래 목록은 해당 기준을 충족한 고객을 **위험도 순**으로 정렬해 보여줍니다."
+    )
 elif src == "ae":
     flag_col = "AE_ChurnFlag_dyn" if (use_dynamic and "AE_ChurnFlag_dyn" in filtered.columns) else "AE_ChurnFlag"
     sort_metric = "AE_ReconError" if "AE_ReconError" in filtered.columns else "ChurnRiskScore"
     subset = filtered[filtered.get(flag_col, 0) == 1] if flag_col in filtered.columns else filtered.copy()
     thr_value = float(ae_thr) if (use_dynamic and ae_thr is not None) else (
         float(filtered["AE_ReconError"].quantile(0.95)) if "AE_ReconError" in filtered.columns else None)
-    st.markdown("**판단 기준 안내**\n\n- Autoencoder는 정상 패턴 대비 재구성 오차가 큰 샘플을 이탈 신호로 간주합니다.\n- 아래 목록은 해당 기준을 충족한 고객을 **위험도 순**으로 정렬해 보여줍니다.")
+    st.markdown(
+        "**판단 기준 안내**\n\n"
+        "- Autoencoder는 정상 패턴 대비 재구성 오차가 큰 샘플을 이탈 신호로 간주합니다.\n"
+        "- 아래 목록은 해당 기준을 충족한 고객을 **위험도 순**으로 정렬해 보여줍니다."
+    )
 else:
     flag_col = "Both_ChurnFlag_dyn" if (use_dynamic and "Both_ChurnFlag_dyn" in filtered.columns) else "Both_ChurnFlag"
     sort_metric = "ChurnRiskScore"
     subset = filtered[filtered.get(flag_col, 0) == 1] if flag_col in filtered.columns else filtered.copy()
     thr_value = None
-    st.markdown("**판단 기준 안내**\n\n- IF & AE **두 모델 모두 이탈**로 판단된 고객을 고신뢰군으로 정의합니다.\n- 아래 목록은 고신뢰군 중 **이탈위험점수**가 높은 순으로 정렬합니다.")
+    st.markdown(
+        "**판단 기준 안내**\n\n"
+        "- IF & AE **두 모델 모두 이탈**로 판단된 고객을 고신뢰군으로 정의합니다.\n"
+        "- 아래 목록은 고신뢰군 중 **이탈위험점수**가 높은 순으로 정렬합니다."
+    )
 
 # ===== 스냅샷 패널 =====
 colA, colB, colC = st.columns(3)
@@ -153,14 +170,21 @@ if sort_metric in filtered.columns:
     m_all = float(s_all.mean()) if s_all.notna().any() else 0.0
     m_sub = float(s_sub.mean()) if s_sub.notna().any() else 0.0
     delta_pct = ((m_sub - m_all)/m_all*100.0) if m_all > 0 else 0.0
-    colC.metric(f"{KOR_COL.get(sort_metric, sort_metric)} 평균", f"{m_sub:.4f}", f"{delta_pct:+.1f}% vs 전체")
+    colC.metric(
+        f"{KOR_COL.get(sort_metric, sort_metric)} 평균",
+        f"{m_sub:.4f}",
+        f"{delta_pct:+.1f}% vs 전체"
+    )
 
 # ===== 한글 폰트 자동 설정 (그래프용) =====
 def _set_korean_font_if_available():
     try:
         import matplotlib.pyplot as plt
         from matplotlib import font_manager as fm
-        candidates = ["Apple SD Gothic Neo", "Malgun Gothic", "NanumGothic", "Nanum Gothic", "Noto Sans CJK KR"]
+        candidates = [
+            "Apple SD Gothic Neo", "Malgun Gothic",
+            "NanumGothic", "Nanum Gothic", "Noto Sans CJK KR"
+        ]
         available = {f.name for f in fm.fontManager.ttflist}
         for name in candidates:
             if name in available:
@@ -189,7 +213,6 @@ if show_plot and (sort_metric in filtered.columns):
                 ax.set_title(f"{title_key} 분포", fontsize=14, pad=8)
             fig.tight_layout()
             st.pyplot(fig, use_container_width=True)
-            import numpy as np  # ensure numpy for below stats
 
             q50 = float(vals.quantile(0.50))
             q90 = float(vals.quantile(0.90))
@@ -197,7 +220,10 @@ if show_plot and (sort_metric in filtered.columns):
             mean = float(vals.mean())
             std  = float(vals.std(ddof=1)) if len(vals) > 1 else 0.0
             skew = float(vals.skew()) if len(vals) > 2 else 0.0
-            skew_txt = "우측 꼬리(큰 값에 소수 집중)" if skew > 0.5 else ("좌측 꼬리(작은 값에 소수 집중)" if skew < -0.5 else "대칭에 가까움")
+            skew_txt = (
+                "우측 꼬리(큰 값에 소수 집중)" if skew > 0.5
+                else ("좌측 꼬리(작은 값에 소수 집중)" if skew < -0.5 else "대칭에 가까움")
+            )
 
             if thr_value is not None and np.isfinite(thr_value):
                 above = int((vals >= thr_value).sum())
@@ -223,17 +249,26 @@ if show_plot and (sort_metric in filtered.columns):
                 )
 
             if src == "if":
-                st.caption("ℹ️ IF 점수는 격리 깊이에 기반합니다. 임계값을 낮추면 탐지 폭이 넓어지고(재현율↑), 높이면 엄격해집니다(정밀도↑).")
+                st.caption(
+                    "ℹ️ IF 점수는 격리 깊이에 기반합니다. "
+                    "임계값을 낮추면 탐지 폭이 넓어지고(재현율↑), 높이면 엄격해집니다(정밀도↑)."
+                )
             elif src == "ae":
-                st.caption("ℹ️ AE 오차는 정상 패턴에서 벗어난 정도입니다. 임계값을 낮추면 더 많은 이상 신호를 포착합니다.")
+                st.caption(
+                    "ℹ️ AE 오차는 정상 패턴에서 벗어난 정도입니다. "
+                    "임계값을 낮추면 더 많은 이상 신호를 포착합니다."
+                )
             else:
-                st.caption("ℹ️ 고신뢰군은 IF와 AE 모두 임계 이상인 고객입니다. 상단 표의 ‘리스크요인’ 태그로 관리 우선순위를 확인하세요.")
+                st.caption(
+                    "ℹ️ 고신뢰군은 IF와 AE 모두 임계 이상인 고객입니다. "
+                    "상단 표의 ‘리스크요인’ 태그로 관리 우선순위를 확인하세요."
+                )
     except Exception:
         pass
 
 st.markdown("---")
 
-# ===== 위험도 순 리스트 (리스크 요인 태그 + 관리자 친화 위험지표)
+# ===== 위험도 순 리스트 (리스크 요인 태그 + 우선 연락도 지표)
 # 정렬 및 순위점수 생성
 if sort_metric in subset.columns:
     subset = subset.sort_values(sort_metric, ascending=False)
@@ -256,12 +291,16 @@ top_k = st.slider("표시 건수", min_value=10, max_value=500, value=100, step=
 def qdict(series):
     s = pd.to_numeric(series, errors="coerce").dropna()
     if s.empty: return None
-    return {"p10": float(s.quantile(0.10)), "p20": float(s.quantile(0.20)),
-            "p80": float(s.quantile(0.80)), "p90": float(s.quantile(0.90))}
+    return {
+        "p10": float(s.quantile(0.10)), "p20": float(s.quantile(0.20)),
+        "p80": float(s.quantile(0.80)), "p90": float(s.quantile(0.90))
+    }
 
 q = {}
-for c in ["NegativeExperienceIndex","AverageSatisfactionScore","EmailEngagementRate",
-          "CSFrequency","TotalEngagementScore","AvgPurchaseInterval","PurchaseFrequency"]:
+for c in [
+    "NegativeExperienceIndex","AverageSatisfactionScore","EmailEngagementRate",
+    "CSFrequency","TotalEngagementScore","AvgPurchaseInterval","PurchaseFrequency"
+]:
     if c in filtered.columns:
         q[c] = qdict(filtered[c])
 
@@ -270,34 +309,42 @@ def make_risk_tags(row) -> tuple[str, str]:
     def add(label, color):
         tags_html.append(f"<span class='tag tag-{color}'>{label}</span>")
         tags_text.append(label)
+
     ne = row.get("NegativeExperienceIndex")
     if ne is not None and "NegativeExperienceIndex" in q and q["NegativeExperienceIndex"]:
         if pd.notna(ne) and ne >= q["NegativeExperienceIndex"]["p80"]:
             add("부정경험↑", "red")
+
     sat = row.get("AverageSatisfactionScore")
     if sat is not None and "AverageSatisfactionScore" in q and q["AverageSatisfactionScore"]:
         if pd.notna(sat) and sat <= q["AverageSatisfactionScore"]["p20"]:
             add("만족도↓", "amber")
+
     em = row.get("EmailEngagementRate")
     if em is not None and "EmailEngagementRate" in q and q["EmailEngagementRate"]:
         if pd.notna(em) and em <= q["EmailEngagementRate"]["p20"]:
             add("이메일참여↓", "amber")
+
     cs = row.get("CSFrequency")
     if cs is not None and "CSFrequency" in q and q["CSFrequency"]:
         if pd.notna(cs) and cs >= q["CSFrequency"]["p80"]:
             add("상담빈도↑", "amber")
+
     te = row.get("TotalEngagementScore")
     if te is not None and "TotalEngagementScore" in q and q["TotalEngagementScore"]:
         if pd.notna(te) and te <= q["TotalEngagementScore"]["p20"]:
             add("참여점수↓", "gray")
+
     ap = row.get("AvgPurchaseInterval")
     if ap is not None and "AvgPurchaseInterval" in q and q["AvgPurchaseInterval"]:
         if pd.notna(ap) and ap >= q["AvgPurchaseInterval"]["p80"]:
             add("구매간격↑", "gray")
+
     pf = row.get("PurchaseFrequency")
     if pf is not None and "PurchaseFrequency" in q and q["PurchaseFrequency"]:
         if pd.notna(pf) and pf <= q["PurchaseFrequency"]["p20"]:
             add("구매빈도↓", "gray")
+
     return " ".join(tags_html), ", ".join(tags_text)
 
 top_sub = subset.head(top_k).copy()
@@ -309,8 +356,9 @@ for _, r in top_sub.iterrows():
 top_sub["__tags_html__"] = html_tags
 top_sub["__tags_text__"] = text_tags
 
-# ===== 관리자 친화 '위험지표(0-100)' 계산 (5~95 분위 기준 정규화)
-def _risk_index_from_quantiles(ref_series: pd.Series, values: pd.Series, q_low=0.05, q_high=0.95) -> pd.Series:
+# ===== 우선 연락도(0-100) 계산 (5~95 분위 기준 정규화)
+def _priority_index_from_quantiles(ref_series: pd.Series, values: pd.Series,
+                                   q_low=0.05, q_high=0.95) -> pd.Series:
     ref = pd.to_numeric(ref_series, errors="coerce")
     val = pd.to_numeric(values, errors="coerce")
     if ref.notna().any():
@@ -324,22 +372,24 @@ def _risk_index_from_quantiles(ref_series: pd.Series, values: pd.Series, q_low=0
     return idx.round(0).fillna(0)
 
 if sort_metric in filtered.columns:
-    top_sub["__risk_idx__"] = _risk_index_from_quantiles(filtered[sort_metric], top_sub[sort_metric])
+    top_sub["__priority_idx__"] = _priority_index_from_quantiles(
+        filtered[sort_metric], top_sub[sort_metric]
+    )
 else:
-    top_sub["__risk_idx__"] = 0
+    top_sub["__priority_idx__"] = 0
 
-# 위험지표 HTML(막대+배지) 생성
-def _risk_tier(idx: float):
-    if idx >= 90: return "매우 높음", "rb-red"
+# 우선 연락도 HTML(막대+배지) 생성
+def _priority_tier(idx: float):
+    if idx >= 90: return "최우선", "rb-red"
     if idx >= 70: return "높음", "rb-orange"
     if idx >= 40: return "보통", "rb-amber"
-    return "낮음", "rb-gray"
+    return "후순위", "rb-gray"
 
-def _mk_risk_html(idx: float, raw: float, thr: float|None):
-    label, css = _risk_tier(float(idx))
-    tip = f"상대지표 {int(idx)}/100"
+def _mk_priority_html(idx: float, raw: float, thr: float|None):
+    label, css = _priority_tier(float(idx))
+    tip = f"우선 연락 점수 {int(idx)}/100"
     if pd.notna(raw):
-        tip += f" | 원점수 {float(raw):.4f}"
+        tip += f" | 모델 원점수 {float(raw):.4f}"
     if thr is not None and np.isfinite(thr):
         tip += f" | 임계 {float(thr):.4f}"
     return (
@@ -349,14 +399,18 @@ def _mk_risk_html(idx: float, raw: float, thr: float|None):
         f"</div>"
     )
 
-top_sub["__risk_html__"] = [
-    _mk_risk_html(idx, raw=top_sub.iloc[i][sort_metric] if sort_metric in top_sub.columns else np.nan, thr=thr_value)
-    for i, idx in enumerate(top_sub["__risk_idx__"])
+top_sub["__priority_html__"] = [
+    _mk_priority_html(
+        idx,
+        raw=top_sub.iloc[i][sort_metric] if sort_metric in top_sub.columns else np.nan,
+        thr=thr_value
+    )
+    for i, idx in enumerate(top_sub["__priority_idx__"])
 ]
 
 # ===== 표 구성 (관리자 친화)
 desired = [
-    "CustomerID_clean","GenderLabel","__risk_idx__","__risk_html__",
+    "CustomerID_clean","GenderLabel","__priority_idx__","__priority_html__",
     "ChurnRiskScore","IF_AnomalyScore","AE_ReconError",
     "PurchaseFrequency","CSFrequency","AverageSatisfactionScore","NegativeExperienceIndex",
     "EmailEngagementRate","TotalEngagementScore"
@@ -368,27 +422,29 @@ if view_df.empty:
     st.info("현재 조건에서 표시할 고객이 없습니다.")
     st.stop()
 
-# 순번 + 상세 링크 + 리스크 요인 + 위험지표(HTML)
+# 순번 + 상세 링크 + 리스크 요인 + 우선 연락도(HTML)
 view_df.insert(0, "", np.arange(1, len(view_df) + 1))
 view_df["고객ID"] = top_sub["CustomerID_clean"].apply(
     lambda cid: f"<a href='/Customer_Detail?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
 )
 view_df["리스크요인"] = top_sub["__tags_html__"]
-view_df["위험지표"] = top_sub["__risk_html__"]
+view_df["우선 연락도"] = top_sub["__priority_html__"]
 
 # 불필요한 내부 컬럼 제거 및 라벨링
-view_df.drop(columns=["CustomerID_clean","__risk_html__"], inplace=True, errors="ignore")
+view_df.drop(columns=["CustomerID_clean","__priority_html__"], inplace=True, errors="ignore")
 view_df = rename_for_display(view_df)
 
-# 표 표시 순서: 순번 → 고객ID → 위험지표 → 리스크요인 → (참고) 모델 원점수/지표
-# - 원점수는 표에서는 기본 숨김 대신 툴팁으로 제공. 보고 싶으면 아래 cols에 추가하면 됨.
-display_cols = ["", "고객ID", "위험지표", "리스크요인"] + [
-    c for c in view_df.columns if c not in ("","고객ID","위험지표","리스크요인","__risk_idx__")
+# 표 표시 순서: 순번 → 고객ID → 우선 연락도 → 리스크요인 → (참고) 모델 원점수/지표
+display_cols = ["", "고객ID", "우선 연락도", "리스크요인"] + [
+    c for c in view_df.columns
+    if c not in ("","고객ID","우선 연락도","리스크요인","__priority_idx__")
 ]
 
-# 숫자 포맷 (위험지표/리스크요인은 HTML이므로 제외)
-fmt_map = {c: "{:.2f}" for c in display_cols
-           if c not in ("","고객ID","성별","위험지표","리스크요인")}
+# 숫자 포맷
+fmt_map = {
+    c: "{:.2f}" for c in display_cols
+    if c not in ("","고객ID","성별","우선 연락도","리스크요인")
+}
 
 styler = view_df[display_cols].style.format(fmt_map).hide(axis="index")
 styler = styler.set_table_attributes('id="risky_list_table" class="dataframe"')
@@ -411,7 +467,7 @@ st.markdown("""
 .tag-amber { background: rgba(255,149,  0, 0.18); border: 1px solid rgba(255,149,  0, 0.35); }
 .tag-gray  { background: rgba(128,128,128,0.18); border: 1px solid rgba(128,128,128,0.35); }
 
-/* 위험지표 막대 + 배지 */
+/* 우선 연락도 막대 + 배지 */
 .rwrap { display:flex; align-items:center; gap:8px; }
 .rbar  { flex:1; height:10px; background:rgba(0,0,0,0.06); border-radius:999px; overflow:hidden; }
 .rbar .fill { height:100%; }
@@ -430,24 +486,32 @@ st.markdown("""
 
 st.markdown(styler.to_html(escape=False), unsafe_allow_html=True)
 
-# ===== CSV 다운로드 (태그=텍스트, 위험지표/원점수 포함)
+# ===== CSV 다운로드 (태그=텍스트, 우선 연락도/원점수 포함)
 export_df = view_df.copy()
 export_df.rename(columns={"": "순위"}, inplace=True)
 export_df.insert(1, "CustomerID", export_df["고객ID"].str.extract(r'>(.*?)<')[0])
 
-# 위험지표(0-100) & 원점수 열 추가
-export_df.drop(columns=["위험지표"], inplace=True)
-export_df.insert(2, "위험지표(0-100)", top_sub["__risk_idx__"].astype(int).values)
+# 우선 연락도(0-100) & 원점수 열 추가
+export_df.drop(columns=["우선 연락도"], inplace=True)
+export_df.insert(2, "우선연락도(0-100)", top_sub["__priority_idx__"].astype(int).values)
 
 raw_label = {
-    "if": f"원점수({KOR_COL.get('IF_AnomalyScore','IF_AnomalyScore')})",
-    "ae": f"원점수({KOR_COL.get('AE_ReconError','AE_ReconError')})",
+    "if":   f"원점수({KOR_COL.get('IF_AnomalyScore','IF_AnomalyScore')})",
+    "ae":   f"원점수({KOR_COL.get('AE_ReconError','AE_ReconError')})",
     "both": f"원점수({KOR_COL.get('ChurnRiskScore','ChurnRiskScore')})",
 }.get(src, "원점수")
-raw_series = pd.to_numeric(top_sub[sort_metric], errors="coerce").round(6) if sort_metric in top_sub.columns else pd.Series([np.nan]*len(top_sub))
+raw_series = (
+    pd.to_numeric(top_sub[sort_metric], errors="coerce").round(6)
+    if sort_metric in top_sub.columns else pd.Series([np.nan]*len(top_sub))
+)
 export_df.insert(3, raw_label, raw_series.values)
 
 export_df["리스크요인"] = top_sub["__tags_text__"].values
 
 csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-st.download_button("⬇️ CSV 내려받기", data=csv_bytes, file_name=f"{src}_risky_customers.csv", mime="text/csv")
+st.download_button(
+    "⬇️ CSV 내려받기",
+    data=csv_bytes,
+    file_name=f"{src}_risky_customers.csv",
+    mime="text/csv"
+)

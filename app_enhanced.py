@@ -1,14 +1,17 @@
+# app_enhanced.py
 # -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os, json
+import os, json, sqlite3
 from urllib.parse import quote, unquote
+
+from utils_vip import compute_vip_propensity_score  # VIP 잠재지수 계산
 
 # -------------------------------
 # Page Config
 # -------------------------------
-st.set_page_config(page_title="고객 이탈 위험 대시보드 (Enhanced)", layout="wide")
+st.set_page_config(page_title="고객 이탈 위험 대시보드", layout="wide")
 
 # 상세 페이지 라우트 (pages/01_Customer_Detail.py → /Customer_Detail)
 DETAIL_PAGE_SLUG = "Customer_Detail"  # 상세 링크에서 사용
@@ -26,6 +29,7 @@ def qp_get(name: str):
         v = v[0] if v else None
     return v
 
+
 def qp_set(**kwargs):
     """Set query params for both new and old APIs."""
     try:
@@ -37,7 +41,6 @@ def qp_set(**kwargs):
 # -------------------------------
 # 화면 표시용 한글 라벨 맵(표시 전용; 내부 컬럼명은 그대로 사용)
 # -------------------------------
-# 화면 표시용 한글 라벨 맵(표시 전용; 내부 컬럼명은 그대로 사용)
 KOR_COL = {
     "CustomerID_clean": "고객ID",
     "GenderLabel": "성별",
@@ -58,7 +61,14 @@ KOR_COL = {
     "CustomerServiceInteractions": "고객센터상담수",
     "Age": "나이",
     "RepeatAndPremiumFlag": "리피트/프리미엄",
+    # VIP / 오늘 연락 대상용
+    "VIP잠재지수": "VIP전환지수",
+    "coverage": "데이터충분도",
+    # 위험도 0~100 + 등급
+    "RiskScore100": "이탈위험도(100점)",
+    "RiskLevel": "위험등급",
 }
+
 def rename_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={c: KOR_COL.get(c, c) for c in df.columns})
 
@@ -73,6 +83,7 @@ DEFAULT_CODE_TO_LABEL_KO = {
     2: "남성",
     0: "여성",
 }
+
 
 def _normalize_gender_text_to_label_ko(x) -> str:
     """원본 문자열 성별을 한국어 라벨로 표준화."""
@@ -90,6 +101,7 @@ def _normalize_gender_text_to_label_ko(x) -> str:
     if s in {"other", "기타"}:
         return "기타"
     return "기타"  # 정의 불명 문자열은 기타로
+
 
 def ensure_gender_label(
     df_hybrid: pd.DataFrame,
@@ -157,6 +169,7 @@ def load_main():
 
     return df
 
+
 @st.cache_data(show_spinner=False)
 def load_featured():
     try:
@@ -172,17 +185,40 @@ def load_featured():
     except Exception:
         return None
 
+
+# actions.db 로드
+@st.cache_data(show_spinner=False)
+def load_actions():
+    """actions.db에서 고객별 최근 액션 이력을 불러온다."""
+    if not os.path.exists("actions.db"):
+        return pd.DataFrame(columns=["customer_id", "action", "ts"])
+
+    conn = sqlite3.connect("actions.db")
+    df = pd.read_sql_query(
+        "SELECT customer_id, action, ts FROM actions",
+        conn
+    )
+    conn.close()
+
+    df["customer_id"] = df["customer_id"].astype(str).str.strip()
+    df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
+    return df
+
+
 df = load_main()
 dff = load_featured()
+actions_df = load_actions()
 
 # -------------------------------
 # Helpers
 # -------------------------------
-def exists(col): 
+def exists(col):
     return col in df.columns
+
 
 def col_or_none(cols):
     return [c for c in cols if c in df.columns]
+
 
 def get_p99(series: pd.Series) -> float:
     try:
@@ -190,6 +226,32 @@ def get_p99(series: pd.Series) -> float:
         return p if p > 0 else 1.0
     except Exception:
         return 1.0
+
+
+def compute_risk_score_100(series: pd.Series) -> pd.Series:
+    """모델 raw 점수를 0~100점 위험도로 변환 (상위% 기준)."""
+    s = pd.to_numeric(series, errors="coerce")
+    if not s.notna().any():
+        return pd.Series(np.nan, index=series.index)
+    ranks = s.rank(pct=True)  # 0~1, 값이 클수록 상위
+    scores = (ranks * 100).round(0)
+    return scores
+
+
+def risk_level_from_score(score) -> str:
+    """0~100 위험도 점수를 등급 텍스트로 변환."""
+    if pd.isna(score):
+        return "정보없음"
+    v = float(score)
+    if v >= 90:
+        return "매우 높음"
+    if v >= 70:
+        return "높음"
+    if v >= 40:
+        return "보통"
+    if v >= 20:
+        return "낮음"
+    return "매우 낮음"
 
 # -------------------------------
 # KPI 숫자 클릭 가능 CSS (모양은 그대로, 숫자 위에 투명 링크 오버레이)
@@ -269,15 +331,6 @@ with st.sidebar:
     else:
         if_thr = None
         ae_thr = None
-    
-    # 👉 VIP 인사이트 빠른 이동 (사이드바 하단)
-with st.sidebar:
-    st.markdown("---")
-    try:
-        st.page_link("pages/03_VIP_Insights.py", label="👑 VIP 인사이트 열기", icon="👑")
-    except Exception:
-        # Streamlit 버전에 따라 page_link 미지원 시 URL로 이동
-        st.markdown("[👑 VIP 인사이트 열기](/VIP_Insights)")
 
 # 👉 리스트 페이지가 동일 조건을 사용하도록 세션에 저장
 st.session_state["sel_age"] = sel_age
@@ -312,16 +365,198 @@ else:
     flag_col = "Both_ChurnFlag" if exists("Both_ChurnFlag") else None
 
 # -------------------------------
+# 오늘 우선 연락해야 할 고객 계산
+# -------------------------------
+ACTIONS_LOOKBACK_DAYS = 7  # 최근 N일 기준
+ACTIONS_BENEFIT_KEYWORDS = ["쿠폰", "혜택", "VIP"]  # 혜택/쿠폰 발송 키워드
+
+if not actions_df.empty:
+    cutoff = pd.Timestamp.today() - pd.Timedelta(days=ACTIONS_LOOKBACK_DAYS)
+    recent_actions = actions_df[actions_df["ts"] >= cutoff].copy()
+
+    # 연락 이력이 있다고 보는 고객 (현재는 actions 전체를 연락으로 간주)
+    contacted_ids = set(
+        recent_actions["customer_id"].dropna().astype(str)
+    )
+
+    # 혜택(쿠폰/혜택/VIP 포함) 이력이 있는 고객
+    benefit_mask = recent_actions["action"].fillna("").str.contains(
+        "|".join(ACTIONS_BENEFIT_KEYWORDS),
+        case=False,
+        na=False
+    )
+    benefit_ids = set(
+        recent_actions.loc[benefit_mask, "customer_id"].dropna().astype(str)
+    )
+else:
+    contacted_ids = set()
+    benefit_ids = set()
+
+# 1) 이탈 위험 + 최근 N일 연락 없는 고객
+risky_no_contact = pd.DataFrame()
+if "CustomerID_clean" in filtered.columns:
+    risky_base = filtered.copy()
+    if flag_col and (flag_col in risky_base.columns):
+        risky_base = risky_base[risky_base[flag_col] == 1]
+
+    risky_base = risky_base[risky_base["CustomerID_clean"].notna()].copy()
+    risky_base["cid_key"] = risky_base["CustomerID_clean"].astype(str)
+
+    mask_no_contact = ~risky_base["cid_key"].isin(contacted_ids)
+    risky_no_contact = risky_base[mask_no_contact].copy()
+
+    # 위험도 높은 순 정렬 (raw 점수 기준)
+    if "ChurnRiskScore" in risky_no_contact.columns:
+        risky_no_contact = risky_no_contact.sort_values("ChurnRiskScore", ascending=False)
+
+# 2) VIP 후보 + 최근 N일 혜택 미발송 고객
+vip_no_benefit = pd.DataFrame()
+if "CustomerID_clean" in filtered.columns:
+    try:
+        vip_score_df = compute_vip_propensity_score(filtered, ref_df=filtered)
+        tmp = filtered.merge(
+            vip_score_df[["CustomerID_clean", "VIP잠재지수"]],
+            on="CustomerID_clean",
+            how="left"
+        )
+        tmp = tmp[tmp["CustomerID_clean"].notna()].copy()
+        tmp["cid_key"] = tmp["CustomerID_clean"].astype(str)
+
+        VIP_THR = 80.0  # VIP 후보 기준 점수
+        vip_base = tmp[tmp["VIP잠재지수"] >= VIP_THR].copy()
+
+        mask_no_benefit = ~vip_base["cid_key"].isin(benefit_ids)
+        vip_no_benefit = vip_base[mask_no_benefit].copy()
+
+        vip_no_benefit = vip_no_benefit.sort_values("VIP잠재지수", ascending=False)
+    except Exception:
+        vip_no_benefit = pd.DataFrame()
+
+# 오늘 보여줄 Top N (단, metric은 실제 건수 기반)
+RISKY_TODAY_LIMIT = 10
+VIP_TODAY_LIMIT = 7
+
+risky_today_n = int(min(RISKY_TODAY_LIMIT, len(risky_no_contact)))
+vip_today_n   = int(min(VIP_TODAY_LIMIT, len(vip_no_benefit)))
+
+# -------------------------------
 # Layout
 # -------------------------------
 st.title("🧭 고객 이탈 위험 대시보드")
-missing_cnt = int(df.get("CustomerID_clean", pd.Series([np.nan]*len(df))).isna().sum()) if "CustomerID_clean" in df.columns else 0
+missing_cnt = int(df.get("CustomerID_clean", pd.Series([np.nan] * len(df))).isna().sum()) if "CustomerID_clean" in df.columns else 0
 st.caption(f"🧹 CustomerID 결측/무효: {missing_cnt} / {len(df):,}")
 
 tabs = st.tabs(["📊 개요", "🔍 탐색/고객 조회"])
 
+# =========================================
+# 📊 개요 탭
+# =========================================
 with tabs[0]:
-    # KPIs (포맷 그대로 유지)
+    # 👉 오늘 우선 연락해야 할 고객 요약 박스
+    st.markdown("### 📌 금일 연락 대상 고객")
+    cc1, cc2 = st.columns(2)
+    cc1.metric(
+        "이탈 위험 + 최근 7일간 연락 이력 없음",
+        f"{risky_today_n}명"
+    )
+    cc2.metric(
+        "VIP 후보 + 최근 7일간 혜택 미발송",
+        f"{vip_today_n}명"
+    )
+    st.caption("※ 현재 화면의 필터(나이/성별/리피트/임계값)와 최근 7일 기준으로 계산됩니다.")
+
+    # 상세 리스트(expander)
+    with st.expander("금일 연락 대상 자세히 보기", expanded=False):
+        left, right = st.columns(2)
+
+        # ----- 이탈 위험 고객 -----
+        with left:
+            st.markdown("**이탈 위험 + 최근 7일 연락 없음**")
+            if risky_today_n == 0:
+                st.write("해당 조건의 고객이 없습니다.")
+            else:
+                r_view = risky_no_contact.head(RISKY_TODAY_LIMIT).copy()
+                r_view = r_view[r_view["CustomerID_clean"].notna()].copy()
+
+                # 0~100 위험도 + 등급 계산 (👉 새로 추가된 부분)
+                if "ChurnRiskScore" in r_view.columns:
+                    r_view["RiskScore100"] = compute_risk_score_100(r_view["ChurnRiskScore"])
+                    r_view["RiskLevel"] = r_view["RiskScore100"].apply(risk_level_from_score)
+
+                # 링크 컬럼
+                r_view["고객ID"] = r_view["CustomerID_clean"].apply(
+                    lambda cid: f"<a href='/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
+                )
+                base_cols = [
+                    "고객ID",
+                    "RiskLevel",
+                    "RiskScore100",
+                    "PurchaseFrequency",
+                    "CSFrequency",
+                    "AverageSatisfactionScore",
+                    "NegativeExperienceIndex",
+                    "EmailEngagementRate",
+                    "TotalEngagementScore",
+                ]
+                cols = ["고객ID"] + [c for c in base_cols if c in r_view.columns and c != "고객ID"]
+                r_view = r_view[cols]
+                r_view = rename_for_display(r_view)
+
+                fmt_r = {}
+                # 이탈위험도(100점)는 정수
+                if "이탈위험도(100점)" in r_view.columns:
+                    fmt_r["이탈위험도(100점)"] = "{:.0f}"
+                # 나머지 수치 컬럼
+                for c in ["구매빈도", "상담빈도", "평균만족도", "부정경험지수", "이메일참여율", "총참여점수"]:
+                    if c in r_view.columns:
+                        fmt_r[c] = "{:.2f}"
+
+                styler_r = r_view.style.hide(axis="index").format(fmt_r)
+                st.markdown(styler_r.to_html(escape=False), unsafe_allow_html=True)
+
+        # ----- VIP 전환 후보 -----
+        with right:
+            st.markdown("**VIP 후보 + 최근 7일 혜택 미발송**")
+            if vip_today_n == 0:
+                st.write("해당 조건의 고객이 없습니다.")
+            else:
+                v_view = vip_no_benefit.head(VIP_TODAY_LIMIT).copy()
+                v_view = v_view[v_view["CustomerID_clean"].notna()].copy()
+                v_view["고객ID"] = v_view["CustomerID_clean"].apply(
+                    lambda cid: f"<a href='/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
+                )
+                base_cols_v = [
+                    "고객ID",
+                    "VIP잠재지수",
+                    "CustomerLifetimeValue",
+                    "PurchaseFrequency",
+                    "AverageOrderValue",
+                    "TotalEngagementScore",
+                    "EmailEngagementRate",
+                    "MobileAppUsage",
+                ]
+                cols_v = ["고객ID"] + [c for c in base_cols_v if c in v_view.columns and c != "고객ID"]
+                v_view = v_view[cols_v]
+                v_view = rename_for_display(v_view)
+                fmt_v = {
+                    "VIP전환지수": "{:.0f}",
+                    "고객생애가치": "{:,.0f}",
+                    "구매빈도": "{:.2f}",
+                    "평균주문금액": "{:,.0f}",
+                    "총참여점수": "{:.2f}",
+                    "이메일참여율": "{:.2f}",
+                    "모바일앱사용": "{:.0f}",
+                }
+                styler_v = v_view.style.hide(axis="index").format(fmt_v)
+                st.markdown(styler_v.to_html(escape=False), unsafe_allow_html=True)
+
+    # 🔧 KPI-구분선-제목 사이 여백 조정 (줄을 위로, 제목과는 여백 확보)
+    st.markdown(
+        "<hr style='margin-top:8px; margin-bottom:22px; opacity:0.22;'>",
+        unsafe_allow_html=True
+    )
+
+    # KPIs
     col1, col2, col3, col4 = st.columns(4)
     total_customers = len(filtered)
     churn_if = int(filtered["IF_ChurnFlag"].sum()) if exists("IF_ChurnFlag") else 0
@@ -331,22 +566,15 @@ with tabs[0]:
     col1.metric("총 고객 수(필터 반영)", f"{total_customers:,}")
     with col2:
         st.metric("IsolationForest 이탈 고객 수", f"{churn_if:,}")
-        # 숫자 위에 투명 오버레이(손 커서) → 별도 페이지로 이동
         st.markdown("<a class='kpi-link' href='/Risky_List?src=if' title='IF 이탈 고객 목록'></a>", unsafe_allow_html=True)
     with col3:
         st.metric("Autoencoder 이탈 고객 수", f"{churn_ae:,}")
         st.markdown("<a class='kpi-link' href='/Risky_List?src=ae' title='AE 이탈 고객 목록'></a>", unsafe_allow_html=True)
     with col4:
-        st.metric("공통 이탈 고객 (고신뢰군)", f"{churn_both:,} ({(churn_both/total_customers*100 if total_customers else 0):.2f}%)")
+        col4.metric("공통 이탈 고객 (고신뢰군)", f"{churn_both:,} ({(churn_both/total_customers*100 if total_customers else 0):.2f}%)")
         st.markdown("<a class='kpi-link' href='/Risky_List?src=both' title='고신뢰 이탈 고객 목록'></a>", unsafe_allow_html=True)
 
-    # 🔧 KPI-구분선-제목 사이 여백 조정 (줄을 위로, 제목과는 여백 확보)
-    st.markdown(
-        "<hr style='margin-top:8px; margin-bottom:22px; opacity:0.22;'>",
-        unsafe_allow_html=True
-    )
-
-    # 🚨 이탈 위험 고객 리스트 (포맷 유지 + 한글 라벨 + CSV)
+    # 🚨 이탈 위험 고객 리스트 (관리자 친화 버전)
     st.subheader("🚨 이탈 위험 고객 리스트")
     top_k = st.slider("리스트 크기", min_value=5, max_value=200, value=10, step=5)
 
@@ -360,14 +588,28 @@ with tabs[0]:
     elif "CustomerID" in list_df.columns:
         list_df = list_df[list_df["CustomerID"].notna()]
 
-    # 위험도 순 정렬
+    # 위험도 기준 정렬
     if "ChurnRiskScore" in list_df.columns:
         list_df = list_df.sort_values("ChurnRiskScore", ascending=False)
+        # 0~100 위험도 + 등급 계산
+        list_df["RiskScore100"] = compute_risk_score_100(list_df["ChurnRiskScore"])
+        list_df["RiskLevel"] = list_df["RiskScore100"].apply(risk_level_from_score)
 
-    cols_to_show = col_or_none([
-        "CustomerID_clean","GenderLabel","ChurnRiskScore","PurchaseFrequency","CSFrequency",
-        "AverageSatisfactionScore","NegativeExperienceIndex","EmailEngagementRate","TotalEngagementScore"
-    ])
+    # 표에 넣을 컬럼(있는 것만)
+    base_cols = [
+        "CustomerID_clean",
+        "GenderLabel",
+        "RiskLevel",
+        "RiskScore100",
+        "PurchaseFrequency",
+        "CSFrequency",
+        "AverageSatisfactionScore",
+        "NegativeExperienceIndex",
+        "EmailEngagementRate",
+        "TotalEngagementScore",
+    ]
+    cols_to_show = [c for c in base_cols if c in list_df.columns]
+
     risky_customers = list_df.head(top_k)[cols_to_show].copy()
 
     if risky_customers.empty:
@@ -382,53 +624,61 @@ with tabs[0]:
         # 화면 표시용 DF (CustomerID_clean 제거 + 한글 라벨)
         display_df = risky_customers.drop(columns=["CustomerID_clean"], errors="ignore")
         display_df = rename_for_display(display_df)
-        churn_label = KOR_COL.get("ChurnRiskScore", "ChurnRiskScore")  # "이탈위험점수"
 
-        # 표시 순서: 순위 → 고객ID → 나머지
-        display_cols = ["", "고객ID"] + [c for c in display_df.columns if c not in ("", "고객ID")]
+        risk_score_label = KOR_COL.get("RiskScore100", "RiskScore100")
+        risk_level_label = KOR_COL.get("RiskLevel", "RiskLevel")
+
+        # 표시 순서: 순위 → 고객ID → 위험등급 → 위험도 → 나머지
+        display_cols = ["", "고객ID"]
+        if risk_level_label in display_df.columns:
+            display_cols.append(risk_level_label)
+        if risk_score_label in display_df.columns:
+            display_cols.append(risk_score_label)
+        display_cols += [c for c in display_df.columns if c not in display_cols]
 
         # 포맷
-        fmt_map = {c: "{:.2f}" for c in [
-            churn_label, "구매빈도","상담빈도","평균만족도","부정경험지수","이메일참여율","총참여점수"
-        ] if c in display_df.columns}
+        fmt_map = {
+            risk_score_label: "{:.0f}",
+            "구매빈도": "{:.2f}",
+            "상담빈도": "{:.2f}",
+            "평균만족도": "{:.2f}",
+            "부정경험지수": "{:.2f}",
+            "이메일참여율": "{:.2f}",
+            "총참여점수": "{:.2f}",
+        }
 
-        styler = display_df[display_cols].style.format(fmt_map).hide(axis="index")
+        styler = (
+            display_df[display_cols]
+            .style
+            .format({k: v for k, v in fmt_map.items() if k in display_df.columns})
+            .hide(axis="index")
+            .set_table_attributes('id="risky_table" class="dataframe"')
+        )
 
-        # 📌 표에 id 부여해서 길이/너비 CSS 제어
-        styler = styler.set_table_attributes('id="risky_table" class="dataframe"')
+        # 위험도(100점)에 색 농도 주기
+        def style_risk(series: pd.Series):
+            if series.name != risk_score_label:
+                return [""] * len(series)
+            vals = pd.to_numeric(series, errors="coerce")
+            if vals.notna().any():
+                vmin = float(vals.min(skipna=True))
+                vmax = float(vals.max(skipna=True))
+            else:
+                vmin, vmax = 0.0, 1.0
+            rng = (vmax - vmin) if vmax > vmin else 1.0
+            alphas = 0.15 + 0.75 * (vals - vmin) / rng
+            alphas = alphas.clip(lower=0, upper=1).fillna(0)
+            return [f"background-color: rgba(255,0,0,{a:.2f})" for a in alphas]
 
-        # Matplotlib이 있으면 background_gradient, 없으면 CSS 스타일
-        has_mpl = False
-        try:
-            import matplotlib as _mpl  # noqa: F401
-            has_mpl = True
-        except Exception:
-            has_mpl = False
-
-        if has_mpl and (churn_label in display_df.columns):
-            styler = styler.background_gradient(cmap="Reds", subset=[churn_label])
-        else:
-            def style_churn(series: pd.Series):
-                if series.name != churn_label:
-                    return [""] * len(series)
-                vals = pd.to_numeric(series, errors="coerce")
-                if vals.notna().any():
-                    vmin = float(vals.min(skipna=True)); vmax = float(vals.max(skipna=True))
-                else:
-                    vmin, vmax = 0.0, 1.0
-                rng = (vmax - vmin) if vmax > vmin else 1.0
-                alphas = 0.15 + 0.75 * (vals - vmin) / rng
-                alphas = alphas.clip(lower=0, upper=1).fillna(0)
-                return [f"background-color: rgba(255,0,0,{a:.2f})" for a in alphas]
-            if churn_label in display_df.columns:
-                styler = styler.apply(style_churn, axis=0)
+        if risk_score_label in display_df.columns:
+            styler = styler.apply(style_risk, axis=0)
 
         # ✅ 표 길이(행 높이) & 너비 확장 CSS
         st.markdown("""
 <style>
 #risky_table { width: 100% !important; table-layout: fixed; }
 #risky_table th, #risky_table td {
-  padding: 10px 12px !important;   /* 행 높이 조금 키움 */
+  padding: 10px 12px !important;
   line-height: 1.45;
   vertical-align: middle;
 }
@@ -438,34 +688,40 @@ with tabs[0]:
 
         st.markdown(styler.to_html(escape=False), unsafe_allow_html=True)
 
-        # ✅ CSV 다운로드 (대시보드 포맷 유지 + 버튼 유지)
-        export_df = display_df.copy()
+        # ✅ CSV 다운로드
+        export_df = display_df[display_cols].copy()
         export_df.rename(columns={"": "순위"}, inplace=True)
-        if "고객ID" in export_df.columns:
+        if "고객ID" in export_df.columns and "CustomerID" not in export_df.columns:
             export_df.insert(1, "CustomerID", export_df["고객ID"].str.extract(r'>(.*?)<')[0])
-            export_df.drop(columns=["고객ID"], inplace=True)
         csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ 리스트 내려받기 (CSV)", data=csv_bytes,
-                           file_name="risky_customers.csv", mime="text/csv")
+        st.download_button(
+            "⬇️ 리스트 내려받기 (CSV)",
+            data=csv_bytes,
+            file_name="risky_customers.csv",
+            mime="text/csv",
+        )
 
     st.markdown("---")
     # 부가 요약 (일부 피처) — 표 머리만 한글
     if dff is not None:
         st.subheader("📈 요약 통계 (일부 피처)")
         sample_cols = [c for c in [
-            "Age","TotalPurchases","AverageOrderValue","CustomerLifetimeValue",
-            "EmailEngagementRate","MobileAppUsage","CustomerServiceInteractions",
-            "AverageSatisfactionScore","ChurnRiskScore"
+            "Age", "TotalPurchases", "AverageOrderValue", "CustomerLifetimeValue",
+            "EmailEngagementRate", "MobileAppUsage", "CustomerServiceInteractions",
+            "AverageSatisfactionScore", "ChurnRiskScore"
         ] if c in dff.columns]
         if sample_cols:
             desc = dff[sample_cols].describe().T
             desc = rename_for_display(desc)
             st.dataframe(desc, use_container_width=True)
 
+# =========================================
+# 🔍 탐색 / 고객 조회 탭
+# =========================================
 with tabs[1]:
     st.subheader("고객 ID로 조회")
     cid = st.text_input("CustomerID 입력", value="")
-    colA, colB = st.columns([1,1])
+    colA, colB = st.columns([1, 1])
     with colA:
         if st.button("상세 페이지 열기"):
             if cid:

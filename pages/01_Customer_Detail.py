@@ -359,9 +359,9 @@ st.markdown("---")
 st.subheader("🔥 Top 리스크 요인 & 즉시 액션")
 
 candidate_cols = [
-    "PurchaseFrequency","CSFrequency","RecencyProxy",
-    "AverageSatisfactionScore","NegativeExperienceIndex",
-    "EmailEngagementRate","TotalEngagementScore"
+    "PurchaseFrequency", "CSFrequency", "RecencyProxy",
+    "AverageSatisfactionScore", "NegativeExperienceIndex",
+    "EmailEngagementRate", "TotalEngagementScore",
 ]
 driver_cols = [c for c in candidate_cols if exists(c)]
 
@@ -371,63 +371,182 @@ if driver_cols and exists("Both_ChurnFlag"):
     mu = healthy.mean(numeric_only=True)
     sigma = healthy.std(numeric_only=True).replace(0, 1e-6)
     z = ((row[driver_cols] - mu) / sigma).astype(float)
+    # 크기 기준으로 정렬 (절대값 큰 순)
     drivers = z.sort_values(key=lambda s: s.abs(), ascending=False)
 
-    # Top 3 카드
-    top3 = list(drivers.items())[:3]
-    c1, c2, c3 = st.columns(3)
     NAME = {
-        "PurchaseFrequency":"구매 빈도", "CSFrequency":"상담 빈도", "RecencyProxy":"활동저하 지수",
-        "AverageSatisfactionScore":"만족도", "NegativeExperienceIndex":"부정 경험 지수",
-        "EmailEngagementRate":"이메일 참여율", "TotalEngagementScore":"총 참여 점수",
+        "PurchaseFrequency":      "구매 빈도",
+        "CSFrequency":            "상담 빈도",
+        "RecencyProxy":           "활동저하 지수",
+        "AverageSatisfactionScore": "만족도",
+        "NegativeExperienceIndex":  "부정경험 지수",
+        "EmailEngagementRate":      "이메일 참여율",
+        "TotalEngagementScore":     "총 참여 점수",
     }
-    def recommend(feat: str, zval: float):
-        if feat == "CSFrequency": return "이슈 가능성↑ → 시니어 상담 배정, 불만 원인 즉시 해결"
-        if feat == "RecencyProxy": return "휴면 징후↑ → 리엑티베이션(푸시/SMS), 재방문 쿠폰"
-        if feat == "AverageSatisfactionScore": return "만족도↓ → 케어 콜, 품질/배송 개선, 보상 제공"
-        if feat == "NegativeExperienceIndex": return "부정 경험↑ → 근본 원인 제거, 티켓 즉시 처리"
-        if feat == "EmailEngagementRate": return "참여율↓ → 채널 전환(앱푸시/SMS), 제목/발신자 A/B"
-        if feat == "TotalEngagementScore": return "참여점수↓ → (재)온보딩, 알림 설정 유도"
-        if feat == "PurchaseFrequency": return "구매빈도↓ → 바우처/정기구독/번들로 간격 단축"
-        return "개인화 혜택과 빠른 CS 응대"
+
+    # 위험 방향 정의(위에 있는 RISK_DIR와 동일한 의미)
+    DIR = {
+        "CSFrequency":            "higher_worse",
+        "RecencyProxy":           "higher_worse",
+        "NegativeExperienceIndex":"higher_worse",
+        "PurchaseFrequency":      "lower_worse",
+        "AverageSatisfactionScore":"lower_worse",
+        "EmailEngagementRate":    "lower_worse",
+        "TotalEngagementScore":   "lower_worse",
+    }
+
+    def is_bad(feat: str, zval: float) -> bool:
+        d = DIR.get(feat, "neutral")
+        if d == "higher_worse":   # 값이 높을수록 위험
+            return zval > 0.8
+        if d == "lower_worse":    # 값이 낮을수록 위험
+            return zval < -0.8
+        return abs(zval) >= 1.5   # 방향 없는 경우
+
+    def severity_badge_and_text(zval: float):
+        sev = abs(float(zval))
+        if sev >= 2.5:
+            return "🔴 영향 큼", "매우 큼"
+        elif sev >= 1.5:
+            return "🟠 영향 중간", "큼"
+        elif sev >= 1.0:
+            return "🟡 영향 약함", "보통"
+        else:
+            return "⚪ 영향 거의 없음", "작음"
+
+    def describe_problem_action(feat: str, zval: float):
+        """비개발자용 문제 요약 + 권장 액션."""
+        d = DIR.get(feat, "neutral")
+        up = zval > 0  # 평균보다 높은지/낮은지
+
+        # 기본값 (혹시 누락될 경우)
+        problem = "정상 고객과 다른 패턴을 보입니다."
+        action  = "상세 이력을 보고 원인을 파악한 뒤 맞춤 케어를 진행합니다."
+
+        if feat == "CSFrequency":
+            if up:
+                problem = "상담 요청이 정상 고객보다 매우 자주 발생합니다."
+                action  = "시니어 상담을 배정해 최근 이슈를 정리하고, 불만 원인을 바로 해소합니다."
+            else:
+                problem = "상담 요청은 많지 않지만, 이력 확인이 필요합니다."
+                action  = "최근 주문·클레임 기록을 점검해 잠재 이슈를 사전에 차단합니다."
+
+        elif feat == "RecencyProxy":
+            if up:
+                problem = "최근 접속·구매가 크게 줄어 휴면에 가까운 상태입니다."
+                action  = "푸시/SMS 리마인드와 재방문 쿠폰으로 재활성화 캠페인을 진행합니다."
+            else:
+                problem = "최근 활동이 정상 고객보다 활발합니다."
+                action  = "기존 혜택 수준을 유지하고 과도한 프로모션은 피합니다."
+
+        elif feat == "PurchaseFrequency":
+            if zval < 0:
+                problem = "구매 간격이 길어져 재구매 속도가 느려진 상태입니다."
+                action  = "정기구독/번들/바우처로 다음 구매 시점을 앞당기도록 제안합니다."
+            else:
+                problem = "구매 빈도가 정상 고객보다 높은 편입니다."
+                action  = "우수 고객 케어(추가 혜택, VIP 편입 대상)로 관리합니다."
+
+        elif feat == "AverageSatisfactionScore":
+            if zval < 0:
+                problem = "만족도가 정상 고객보다 낮습니다."
+                action  = "케어 콜 및 보상 제안으로 불만 요소를 확인하고 개선합니다."
+            else:
+                problem = "만족도가 정상 고객보다 높습니다."
+                action  = "긍정 후기를 유도하고, 충성 고객 프로그램으로 유입을 확대합니다."
+
+        elif feat == "NegativeExperienceIndex":
+            if up:
+                problem = "불만/클레임 관련 신호가 정상 고객보다 많습니다."
+                action  = "주요 클레임 유형을 정리해 근본 원인을 제거하고, 관련 티켓을 우선 처리합니다."
+            else:
+                problem = "부정 경험 지수는 낮지만, 개별 이력 확인은 필요합니다."
+                action  = "최근 이슈가 없는지 모니터링 수준으로 관리합니다."
+
+        elif feat == "EmailEngagementRate":
+            if zval < 0:
+                problem = "이메일을 거의 열어보지 않아 채널 효과가 떨어집니다."
+                action  = "앱 푸시/SMS 등 다른 채널로 전환하고, 제목·발신자 A/B 테스트를 진행합니다."
+            else:
+                problem = "이메일 참여율이 높아 커뮤니케이션 채널로 효과적입니다."
+                action  = "중요 공지·프로모션을 이메일 중심으로 설계합니다."
+
+        elif feat == "TotalEngagementScore":
+            if zval < 0:
+                problem = "앱/웹 전체 활동 수준이 눈에 띄게 낮아진 상태입니다."
+                action  = "온보딩/재온보딩 캠페인으로 핵심 기능을 다시 안내하고 알림 설정을 유도합니다."
+            else:
+                problem = "앱/웹 활동이 높아 충성 고객에 가깝습니다."
+                action  = "추가 혜택보다 경험 품질(속도, 오류)을 우선 관리합니다."
+
+        return problem, action
+
+    # 1) 상단 카드: 위험 방향으로 많이 벗어난 요인 Top3
+    driver_items = list(drivers.items())
+    bad_items = [(f, float(zv)) for f, zv in driver_items if is_bad(f, float(zv))]
+    if not bad_items:   # 모두 애매하면 그냥 상위 3개 사용
+        bad_items = [(f, float(zv)) for f, zv in driver_items]
+    top3 = bad_items[:3]
+
+    c1, c2, c3 = st.columns(3)
+    cols = [c1, c2, c3]
 
     for i, (feat, zval) in enumerate(top3):
-        with (c1 if i==0 else c2 if i==1 else c3):
-            sev = abs(float(zval))
-            sev_badge = "🔴 편차 큼" if sev >= 2.0 else ("🟠 다소 큼" if sev >= 1.0 else "🟡 보통")
-            st.markdown(f"**{NAME.get(feat, col_label(feat))}**  \n*z={float(zval):+.2f}*  \n{sev_badge}")
-            st.write(f"→ **{recommend(feat, float(zval))}**")
+        if i >= 3:
+            break
+        col = cols[i]
+        with col:
+            badge, sev_text = severity_badge_and_text(zval)
+            problem, action = describe_problem_action(feat, zval)
 
-    # 상세 테이블(Top 5)
+            st.markdown(
+                f"**{NAME.get(feat, feat)}**  \n"
+                f"{badge} · 정상 고객과 차이가 **{sev_text}**입니다.\n\n"
+                f"- **문제 요약**: {problem}\n"
+                f"- **권장 액션**: {action}"
+            )
+
+    # 2) 상세 테이블(Top 5) – 숫자 z점수 대신 텍스트로 영향 정도만 표시
     rows_drv = []
     for feat, zval in list(drivers.items())[:5]:
+        zval = float(zval)
+        _, sev_text = severity_badge_and_text(zval)
+        _, action = describe_problem_action(feat, zval)
         rows_drv.append({
-            "요인": NAME.get(feat, col_label(feat)),
+            "요인": NAME.get(feat, feat),
             "현재": float(row[feat]),
             "정상군 평균": float(mu[feat]),
-            "편차(z)": float(zval),
-            "권장 액션": recommend(feat, float(zval)),
+            "영향 정도": sev_text,
+            "권장 액션": action,
         })
     drv_view = pd.DataFrame(rows_drv)
 
-    def style_z(series: pd.Series):
-        if series.name != "편차(z)":
+    def style_severity(series: pd.Series):
+        if series.name != "영향 정도":
             return [""] * len(series)
-        vals = series.abs()
-        vmax = max(vals.max(), 1.0)
         styles = []
-        for v in vals:
-            a = 0.15 + 0.75 * (float(v) / vmax)
-            a = max(0, min(1, a))
+        for v in series:
+            if v == "매우 큼":
+                a = 0.90
+            elif v == "큼":
+                a = 0.65
+            elif v == "보통":
+                a = 0.40
+            else:  # 작음
+                a = 0.15
             styles.append(f"background-color: rgba(255,0,0,{a:.2f})")
         return styles
 
-    styler_drv = drv_view.style.format({
-        "현재":"{:.2f}", "정상군 평균":"{:.2f}", "편차(z)":"{:+.2f}"
-    }).hide(axis="index").apply(style_z, axis=0)
+    styler_drv = (
+        drv_view.style
+        .format({"현재": "{:.2f}", "정상군 평균": "{:.2f}"})
+        .hide(axis="index")
+        .apply(style_severity, axis=0)
+    )
     st.markdown(styler_drv.to_html(escape=False), unsafe_allow_html=True)
+
 else:
-    st.info("드라이버 분석을 위한 기준 데이터가 부족합니다.")
+    st.info("드라이버 분석을 위한 컬럼/정상군 기준이 부족합니다.")
 
 # -------------------------------
 # 📬 맞춤 문자 생성 / 발송 (개선본)

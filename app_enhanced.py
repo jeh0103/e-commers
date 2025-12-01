@@ -47,8 +47,8 @@ KOR_COL = {
     "ChurnRiskScore": "이탈위험점수",
     "IF_AnomalyScore": "패턴이탈지수(IF)",
     "AE_ReconError": "정상패턴차이(AE)",
-    "PurchaseFrequency": "구매빈도",
-    "CSFrequency": "상담빈도",
+    "PurchaseFrequency": "구매 빈도(월 평균)",
+    "CSFrequency": "상담 빈도(월 평균)",
     "AverageSatisfactionScore": "평균만족도",
     "NegativeExperienceIndex": "부정경험지수",
     "EmailEngagementRate": "이메일참여율",
@@ -65,8 +65,8 @@ KOR_COL = {
     "VIP잠재지수": "VIP전환지수",
     "coverage": "데이터충분도",
     # 위험도 0~100 + 등급
-    "RiskScore100": "이탈위험도(100점)",
-    "RiskLevel": "위험등급",
+    "RiskScore100": "이탈 위험 점수(0~100)",
+    "RiskLevel": "위험 수준",
 }
 
 def rename_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -446,39 +446,79 @@ st.title("🧭 고객 이탈 위험 대시보드")
 missing_cnt = int(df.get("CustomerID_clean", pd.Series([np.nan] * len(df))).isna().sum()) if "CustomerID_clean" in df.columns else 0
 st.caption(f"🧹 CustomerID 결측/무효: {missing_cnt} / {len(df):,}")
 
-tabs = st.tabs(["📊 개요", "🔍 탐색/고객 조회"])
+# 필터 요약
+filter_badges = []
+if sel_age:
+    filter_badges.append(f"나이 {sel_age[0]}~{sel_age[1]}세")
+if sel_gender_labels:
+    filter_badges.append("성별: " + ", ".join(sel_gender_labels))
+if premium_flag_col and premium_opt != "전체":
+    filter_badges.append(f"리피트/프리미엄: {premium_opt}")
+
+if filter_badges:
+    st.caption("현재 적용된 필터: " + " · ".join(filter_badges))
+else:
+    st.caption("현재 적용된 필터: 전체 고객")
+
+tabs = st.tabs(["📊 개요", "🔍 고객 조회"])
 
 # =========================================
 # 📊 개요 탭
 # =========================================
 with tabs[0]:
-    # 👉 오늘 우선 연락해야 할 고객 요약 박스
-    st.markdown("### 📌 금일 연락 대상 고객")
+    # 👉 오늘 우선 관리해야 할 고객 요약 박스
+    st.markdown("### 📌 우선 관리 고객")
+    st.caption("금일 기준으로 연락·혜택 발송이 필요한 주요 고객 수입니다.")
     cc1, cc2 = st.columns(2)
     cc1.metric(
-        "이탈 위험 + 최근 7일간 연락 이력 없음",
+        "이탈 위험 + 최근 7일 연락 이력 없음",
         f"{risky_today_n}명"
     )
     cc2.metric(
-        "VIP 후보 + 최근 7일간 혜택 미발송",
+        "VIP 후보 + 최근 7일 혜택 미발송",
         f"{vip_today_n}명"
     )
     st.caption("※ 현재 화면의 필터(나이/성별/리피트/임계값)와 최근 7일 기준으로 계산됩니다.")
 
+    # 📋 요약표용 CSS: 가로 스크롤 + 헤더/셀 줄바꿈 없음
+    st.markdown(
+        """
+<style>
+.today-summary-wrap {
+  overflow-x: auto;
+}
+.today-summary-table {
+  border-collapse: collapse;
+  width: auto !important;
+  table-layout: auto;
+}
+.today-summary-table th,
+.today-summary-table td {
+  padding: 8px 12px !important;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-size: 0.9rem;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
     # 상세 리스트(expander)
-    with st.expander("금일 연락 대상 자세히 보기", expanded=False):
+    with st.expander("우선 관리 대상 자세히 보기", expanded=False):
         left, right = st.columns(2)
 
         # ----- 이탈 위험 고객 -----
         with left:
-            st.markdown("**이탈 위험 + 최근 7일 연락 없음**")
+            st.markdown("**이탈 위험 + 최근 7일 연락 이력 없음**")
+            st.caption("최근 7일 동안 별도 연락이 없었고, 이탈 위험 점수가 높은 순으로 정렬된 고객입니다.")
             if risky_today_n == 0:
                 st.write("해당 조건의 고객이 없습니다.")
             else:
                 r_view = risky_no_contact.head(RISKY_TODAY_LIMIT).copy()
                 r_view = r_view[r_view["CustomerID_clean"].notna()].copy()
 
-                # 0~100 위험도 + 등급 계산 (👉 새로 추가된 부분)
+                # 0~100 위험도 + 등급 계산
                 if "ChurnRiskScore" in r_view.columns:
                     r_view["RiskScore100"] = compute_risk_score_100(r_view["ChurnRiskScore"])
                     r_view["RiskLevel"] = r_view["RiskScore100"].apply(risk_level_from_score)
@@ -493,30 +533,31 @@ with tabs[0]:
                     "RiskScore100",
                     "PurchaseFrequency",
                     "CSFrequency",
-                    "AverageSatisfactionScore",
-                    "NegativeExperienceIndex",
-                    "EmailEngagementRate",
-                    "TotalEngagementScore",
                 ]
                 cols = ["고객ID"] + [c for c in base_cols if c in r_view.columns and c != "고객ID"]
                 r_view = r_view[cols]
                 r_view = rename_for_display(r_view)
 
                 fmt_r = {}
-                # 이탈위험도(100점)는 정수
-                if "이탈위험도(100점)" in r_view.columns:
-                    fmt_r["이탈위험도(100점)"] = "{:.0f}"
-                # 나머지 수치 컬럼
-                for c in ["구매빈도", "상담빈도", "평균만족도", "부정경험지수", "이메일참여율", "총참여점수"]:
+                if "이탈 위험 점수(0~100)" in r_view.columns:
+                    fmt_r["이탈 위험 점수(0~100)"] = "{:.0f}"
+                for c in ["구매 빈도(월 평균)", "상담 빈도(월 평균)"]:
                     if c in r_view.columns:
                         fmt_r[c] = "{:.2f}"
 
-                styler_r = r_view.style.hide(axis="index").format(fmt_r)
-                st.markdown(styler_r.to_html(escape=False), unsafe_allow_html=True)
+                styler_r = (
+                    r_view.style
+                    .hide(axis="index")
+                    .format(fmt_r)
+                    .set_table_attributes('class="today-summary-table"')
+                )
+                html_r = styler_r.to_html(escape=False)
+                st.markdown(f"<div class='today-summary-wrap'>{html_r}</div>", unsafe_allow_html=True)
 
         # ----- VIP 전환 후보 -----
         with right:
             st.markdown("**VIP 후보 + 최근 7일 혜택 미발송**")
+            st.caption("VIP로 성장 가능성이 높고, 최근 7일 동안 별도 혜택이 발송되지 않은 고객입니다.")
             if vip_today_n == 0:
                 st.write("해당 조건의 고객이 없습니다.")
             else:
@@ -541,14 +582,20 @@ with tabs[0]:
                 fmt_v = {
                     "VIP전환지수": "{:.0f}",
                     "고객생애가치": "{:,.0f}",
-                    "구매빈도": "{:.2f}",
+                    "구매 빈도(월 평균)": "{:.2f}",
                     "평균주문금액": "{:,.0f}",
                     "총참여점수": "{:.2f}",
                     "이메일참여율": "{:.2f}",
                     "모바일앱사용": "{:.0f}",
                 }
-                styler_v = v_view.style.hide(axis="index").format(fmt_v)
-                st.markdown(styler_v.to_html(escape=False), unsafe_allow_html=True)
+                styler_v = (
+                    v_view.style
+                    .hide(axis="index")
+                    .format(fmt_v)
+                    .set_table_attributes('class="today-summary-table"')
+                )
+                html_v = styler_v.to_html(escape=False)
+                st.markdown(f"<div class='today-summary-wrap'>{html_v}</div>", unsafe_allow_html=True)
 
     # 🔧 KPI-구분선-제목 사이 여백 조정 (줄을 위로, 제목과는 여백 확보)
     st.markdown(
@@ -556,7 +603,10 @@ with tabs[0]:
         unsafe_allow_html=True
     )
 
-    # KPIs
+    # 📊 전체 이탈 위험 현황 요약
+    st.subheader("📊 전체 이탈 위험 현황 요약")
+    st.caption("모델이 포착한 이탈 위험 고객 수를 유형별로 나눈 요약입니다.")
+
     col1, col2, col3, col4 = st.columns(4)
     total_customers = len(filtered)
     churn_if = int(filtered["IF_ChurnFlag"].sum()) if exists("IF_ChurnFlag") else 0
@@ -565,17 +615,19 @@ with tabs[0]:
 
     col1.metric("총 고객 수(필터 반영)", f"{total_customers:,}")
     with col2:
-        st.metric("IsolationForest 이탈 고객 수", f"{churn_if:,}")
-        st.markdown("<a class='kpi-link' href='/Risky_List?src=if' title='IF 이탈 고객 목록'></a>", unsafe_allow_html=True)
+        st.metric("이상행동 기반 이탈 의심 고객 수", f"{churn_if:,}")
+        st.markdown("<a class='kpi-link' href='/Risky_List?src=if' title='이상행동 기반 이탈 고객 목록'></a>", unsafe_allow_html=True)
     with col3:
-        st.metric("Autoencoder 이탈 고객 수", f"{churn_ae:,}")
-        st.markdown("<a class='kpi-link' href='/Risky_List?src=ae' title='AE 이탈 고객 목록'></a>", unsafe_allow_html=True)
+        st.metric("패턴 변화 기반 이탈 의심 고객 수", f"{churn_ae:,}")
+        st.markdown("<a class='kpi-link' href='/Risky_List?src=ae' title='패턴 변화 기반 이탈 고객 목록'></a>", unsafe_allow_html=True)
     with col4:
-        col4.metric("공통 이탈 고객 (고신뢰군)", f"{churn_both:,} ({(churn_both/total_customers*100 if total_customers else 0):.2f}%)")
-        st.markdown("<a class='kpi-link' href='/Risky_List?src=both' title='고신뢰 이탈 고객 목록'></a>", unsafe_allow_html=True)
+        ratio = churn_both/total_customers*100 if total_customers else 0
+        col4.metric("두 기준 모두 위험한 고위험 고객 수", f"{churn_both:,} ({ratio:.2f}%)")
+        st.markdown("<a class='kpi-link' href='/Risky_List?src=both' title='고위험 이탈 고객 목록'></a>", unsafe_allow_html=True)
 
     # 🚨 이탈 위험 고객 리스트 (관리자 친화 버전)
     st.subheader("🚨 이탈 위험 고객 리스트")
+    st.caption("이탈 위험 점수가 높은 순으로 정렬된 고객입니다. 고객ID를 클릭하면 상세 화면으로 이동합니다.")
     top_k = st.slider("리스트 크기", min_value=5, max_value=200, value=10, step=5)
 
     list_df = filtered.copy()
@@ -628,7 +680,7 @@ with tabs[0]:
         risk_score_label = KOR_COL.get("RiskScore100", "RiskScore100")
         risk_level_label = KOR_COL.get("RiskLevel", "RiskLevel")
 
-        # 표시 순서: 순위 → 고객ID → 위험등급 → 위험도 → 나머지
+        # 표시 순서: 순위 → 고객ID → 위험 수준 → 이탈 위험 점수 → 나머지
         display_cols = ["", "고객ID"]
         if risk_level_label in display_df.columns:
             display_cols.append(risk_level_label)
@@ -639,8 +691,8 @@ with tabs[0]:
         # 포맷
         fmt_map = {
             risk_score_label: "{:.0f}",
-            "구매빈도": "{:.2f}",
-            "상담빈도": "{:.2f}",
+            "구매 빈도(월 평균)": "{:.2f}",
+            "상담 빈도(월 평균)": "{:.2f}",
             "평균만족도": "{:.2f}",
             "부정경험지수": "{:.2f}",
             "이메일참여율": "{:.2f}",
@@ -673,20 +725,31 @@ with tabs[0]:
         if risk_score_label in display_df.columns:
             styler = styler.apply(style_risk, axis=0)
 
-        # ✅ 표 길이(행 높이) & 너비 확장 CSS
-        st.markdown("""
+        # ✅ 표 가로 스크롤 + 헤더/셀 줄바꿈 없음
+        st.markdown(
+            """
 <style>
-#risky_table { width: 100% !important; table-layout: fixed; }
+.risky-wrap {
+  overflow-x: auto;
+}
+#risky_table {
+  border-collapse: collapse;
+  width: auto !important;
+  table-layout: auto;
+}
 #risky_table th, #risky_table td {
   padding: 10px 12px !important;
   line-height: 1.45;
   vertical-align: middle;
+  white-space: nowrap;
 }
-#risky_table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
-""", unsafe_allow_html=True)
+""",
+            unsafe_allow_html=True,
+        )
 
-        st.markdown(styler.to_html(escape=False), unsafe_allow_html=True)
+        html_main = styler.to_html(escape=False)
+        st.markdown(f"<div class='risky-wrap'>{html_main}</div>", unsafe_allow_html=True)
 
         # ✅ CSV 다운로드
         export_df = display_df[display_cols].copy()
@@ -705,6 +768,7 @@ with tabs[0]:
     # 부가 요약 (일부 피처) — 표 머리만 한글
     if dff is not None:
         st.subheader("📈 요약 통계 (일부 피처)")
+        st.caption("주요 지표의 분포를 요약한 표입니다. 상위/하위 분위수 확인에 활용할 수 있습니다.")
         sample_cols = [c for c in [
             "Age", "TotalPurchases", "AverageOrderValue", "CustomerLifetimeValue",
             "EmailEngagementRate", "MobileAppUsage", "CustomerServiceInteractions",
@@ -716,10 +780,11 @@ with tabs[0]:
             st.dataframe(desc, use_container_width=True)
 
 # =========================================
-# 🔍 탐색 / 고객 조회 탭
+# 🔍 고객 조회 탭
 # =========================================
 with tabs[1]:
     st.subheader("고객 ID로 조회")
+    st.caption("특정 고객ID를 직접 입력해 해당 고객의 상세 정보를 확인할 수 있습니다.")
     cid = st.text_input("CustomerID 입력", value="")
     colA, colB = st.columns([1, 1])
     with colA:
@@ -737,7 +802,7 @@ with tabs[1]:
                 p99 = get_p99(df["ChurnRiskScore"])
                 risk = float(q.iloc[0]["ChurnRiskScore"]) / p99
                 risk = min(max(risk, 0.0), 1.0)
-                st.write("위험도(상대):")
+                st.write("해당 고객의 상대적 이탈 위험도(상위 % 기준):")
                 st.progress(risk)
                 st.dataframe(rename_for_display(q.head(1)).T, use_container_width=True)
             elif q.empty:

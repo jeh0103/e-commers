@@ -90,15 +90,21 @@ def ensure_gender_label(df: pd.DataFrame,
     code_map = DEFAULT_CODE_TO_LABEL_KO.copy()
     code_json = _load_json(GENDER_CODE_MAP_PATH)
     if code_json:
-        try: code_map.update({int(k): v for k, v in code_json.items()})
-        except Exception: pass
+        try:
+            code_map.update({int(k): v for k, v in code_json.items()})
+        except Exception:
+            pass
     label_json = _load_json(GENDER_LABEL_MAP_PATH)
     if label_json:
-        try: code_map.update({int(k): v for k, v in label_json.items()})
-        except Exception: pass
+        try:
+            code_map.update({int(k): v for k, v in label_json.items()})
+        except Exception:
+            pass
     if "gender_label_map" in st.session_state and isinstance(st.session_state["gender_label_map"], dict):
-        try: code_map.update({int(k): v for k, v in st.session_state["gender_label_map"].items()})
-        except Exception: pass
+        try:
+            code_map.update({int(k): v for k, v in st.session_state["gender_label_map"].items()})
+        except Exception:
+            pass
 
     # 숫자 코드에서 라벨 생성
     if "Gender" in out.columns:
@@ -391,7 +397,7 @@ else:
     st.info("드라이버 분석을 위한 컬럼/정상군 기준이 부족합니다.")
 
 # -------------------------------
-# 📬 맞춤 문자 생성 / 발송 (향상본)
+# 📬 맞춤 문자 생성 / 발송 (개선본)
 # -------------------------------
 st.markdown("---")
 st.subheader("📨 맞춤 문자 생성/발송")
@@ -411,62 +417,43 @@ def sms_segments_korean(text: str):
         return seg, remain, n
 
 def limit_for_segments(target_segments: int) -> int:
-    # 1건: 70자, 2건: 70+67 = 137자
     if target_segments <= 1:
         return 70
     return 70 + 67 * (target_segments - 1)
 
+
 # ──────────────────────
-# 1) 위험 사유(리스크 드라이버) → 자연어 문구
+# 1) 리스크 사유 → 한 문장 요약
 # ──────────────────────
 def top_risk_reasons_natural(drivers_series: pd.Series) -> list[str]:
+    """SMS에 쓸 수 있는 짧은 리스크 설명 1문장만 반환."""
     if drivers_series is None or drivers_series.empty:
         return []
-    # 리스크 방향 정의
-    dir_map = {
-        "CSFrequency": "higher_worse",
-        "RecencyProxy": "higher_worse",
-        "NegativeExperienceIndex": "higher_worse",
-        "AvgPurchaseInterval": "higher_worse",
-        "PurchaseFrequency": "lower_worse",
-        "AverageSatisfactionScore": "lower_worse",
-        "EmailEngagementRate": "lower_worse",
-        "TotalEngagementScore": "lower_worse",
-    }
-    # 후보(나쁜 방향만 우선)
-    cand = []
-    for feat, zval in drivers_series.items():
-        d = dir_map.get(feat, "neutral")
-        bad = (zval > 0 and d == "higher_worse") or (zval < 0 and d == "lower_worse")
-        if d == "neutral":
-            bad = abs(zval) >= 1.0
-        if bad:
-            cand.append((feat, float(zval)))
-    if not cand:
-        cand = [(k, float(v)) for k, v in drivers_series.items()]
-    cand = sorted(cand, key=lambda x: abs(x[1]), reverse=True)[:2]
 
-    reasons = []
-    for feat, z in cand:
-        if feat == "RecencyProxy":
-            reasons.append("최근 이용이 줄어든 것으로 보여")
-        elif feat == "PurchaseFrequency":
-            reasons.append("구매 간격이 길어져")
-        elif feat == "CSFrequency":
-            reasons.append("상담 이력이 잦아 불편하셨을 수 있어")
-        elif feat == "AverageSatisfactionScore":
-            reasons.append("만족도가 낮게 확인되어")
-        elif feat == "NegativeExperienceIndex":
-            reasons.append("부정 경험 신호가 확인되어")
-        elif feat == "EmailEngagementRate":
-            reasons.append("이메일 확인이 어려우신 것 같아")
-        elif feat == "TotalEngagementScore":
-            reasons.append("앱/웹 활동이 줄어")
-        elif feat == "AvgPurchaseInterval":
-            reasons.append("구매 간격이 늘어나")
-        else:
-            reasons.append("이용 패턴에 변동이 있어")
-    return reasons[:2]
+    # 절대값 기준 가장 큰 요인 1개 선택
+    feat, z = sorted(
+        drivers_series.items(),
+        key=lambda x: abs(float(x[1])),
+        reverse=True
+    )[0]
+
+    z = float(z)
+
+    if feat == "CSFrequency":
+        sent = "최근 상담이 자주 발생해 많이 번거로우셨을 수 있습니다."
+    elif feat == "NegativeExperienceIndex":
+        sent = "이용 과정에서 불편이나 클레임이 있었던 것으로 보입니다."
+    elif feat == "AverageSatisfactionScore":
+        sent = "만족도 응답에서 기대에 못 미친 부분이 있었습니다."
+    elif feat in ["RecencyProxy", "AvgPurchaseInterval", "PurchaseFrequency"]:
+        sent = "최근 이용·구매 빈도가 줄어든 상태입니다."
+    elif feat in ["EmailEngagementRate", "TotalEngagementScore"]:
+        sent = "앱·이메일 활동이 예전보다 줄어든 상태입니다."
+    else:
+        sent = "이용 패턴에 변동이 있는 고객으로 분석되었습니다."
+
+    return [sent]
+
 
 # ──────────────────────
 # 2) 드라이버 기반 메시지 타입 자동 판정
@@ -475,167 +462,269 @@ def top_risk_reasons_natural(drivers_series: pd.Series) -> list[str]:
 def detect_message_theme(drivers_series: pd.Series) -> str:
     if drivers_series is None or drivers_series.empty:
         return "promo"
-    # z-score 기준으로 주요 신호 파악
     z = drivers_series.to_dict()
-    def gt(name, thr=0.8):   # 높을수록 나쁜 지표
+
+    def gt(name, thr=0.8):
         return abs(float(z.get(name, 0))) >= thr and float(z.get(name, 0)) > 0
-    def lt(name, thr=0.8):   # 낮을수록 나쁜 지표
+
+    def lt(name, thr=0.8):
         return abs(float(z.get(name, 0))) >= thr and float(z.get(name, 0)) < 0
 
     if gt("CSFrequency") or gt("NegativeExperienceIndex") or lt("AverageSatisfactionScore"):
-        return "care"      # 불만/사과형
+        return "care"
     if gt("RecencyProxy") or gt("AvgPurchaseInterval") or lt("PurchaseFrequency"):
-        return "winback"   # 휴면/재활성
+        return "winback"
     if lt("EmailEngagementRate") or lt("TotalEngagementScore"):
-        return "engage"    # 참여 활성화
+        return "engage"
     return "promo"
 
+
 # ──────────────────────
-# 3) 톤 & 타입별 템플릿 (A/B) + 길이 자동 맞춤
+# 3) 톤 & 타입별 템플릿 (1건용 / 2건용 별도 설계)
 # ──────────────────────
-def compose_variants(theme: str, tone: str, customer_id: str, brand: str, benefit: str,
-                     expiry: "datetime.date|str", landing_url: str, cs_contact: str, optout: str):
+def compose_variants(
+    theme: str,
+    tone: str,
+    customer_id: str,
+    brand: str,
+    benefit: str,
+    expiry: "datetime.date|str",
+    landing_url: str,
+    cs_contact: str,
+    optout: str,
+    target_segments: int,
+    reason_sentence: str | None = None,
+):
+    # 만료일 문자열
     exp_str = ""
     try:
         import datetime as _dt
         if isinstance(expiry, _dt.date):
-            exp_str = f"만료 {expiry.strftime('%Y-%m-%d')}"
+            exp_str = expiry.strftime("%Y-%m-%d")
         elif expiry:
-            exp_str = f"만료 {expiry}"
+            exp_str = str(expiry)
     except Exception:
-        if expiry: exp_str = f"만료 {expiry}"
+        if expiry:
+            exp_str = str(expiry)
 
     # 인사말(톤)
     if tone == "친근":
-        hi = f"[{brand}] {customer_id}님,"
+        hi_short = f"[{brand}] {customer_id}님"
+        hi_long  = f"[{brand}] {customer_id}님 안녕하세요."
     elif tone == "긴급(한정)":
-        hi = f"[{brand}] {customer_id} 고객님,"
+        hi_short = f"[{brand}] {customer_id} 고객님"
+        hi_long  = f"[{brand}] {customer_id} 고객님, 중요한 안내드립니다."
     else:  # 정중
-        hi = f"[{brand}] {customer_id} 고객님,"
+        hi_short = f"[{brand}] {customer_id} 고객님"
+        hi_long  = f"[{brand}] {customer_id} 고객님 안녕하세요."
 
-    # 타입별 바디 A/B
-    if theme == "care":
-        A = f"{hi} 불편 드려 죄송합니다. 사과의 뜻으로 {benefit} 드립니다. {exp_str}."
-        B = f"{hi} 이용 중 불편을 확인했습니다. {benefit} 제공드립니다. {exp_str}."
-    elif theme == "winback":
-        A = f"{hi} 오랜만이에요. 돌아오실 수 있게 {benefit} 준비했어요. {exp_str}."
-        B = f"{hi} 최근 이용이 적어 아쉬워요. 지금 {benefit}로 다시 만나세요. {exp_str}."
-    elif theme == "engage":
-        A = f"{hi} 새 혜택을 놓치지 마세요. 맞춤 {benefit} 드립니다. {exp_str}."
-        B = f"{hi} 참여 혜택을 강화했어요. 전용 {benefit} 확인해 주세요. {exp_str}."
-    else:  # promo
-        A = f"{hi} 고객님께 맞춘 {benefit} 안내드립니다. {exp_str}."
-        B = f"{hi} 지금 적용 가능한 {benefit}가 준비됐습니다. {exp_str}."
+    use_reason = bool(reason_sentence and target_segments > 1)
+    rs = (reason_sentence or "").rstrip()
 
-    # CTA/추가
+    # ---------- 1건(짧은 버전) ----------
+    if target_segments == 1:
+        if theme == "care":
+            A = f"{hi_short}, 이용 중 불편을 드려 죄송합니다. 사과의 마음으로 {benefit}을 드립니다."
+            B = f"{hi_short}, 서비스 이용에 불편이 있으셨다면 죄송합니다. 보상으로 {benefit}을 준비했습니다."
+        elif theme == "winback":
+            A = f"{hi_short}, 오랜만에 인사드립니다. 다시 방문 시 {benefit}을 드립니다."
+            B = f"{hi_short}, 최근 이용이 줄어 아쉬운 마음에 {benefit}을 준비했습니다."
+        elif theme == "engage":
+            A = f"{hi_short}, 새 혜택과 이벤트가 열렸습니다. {benefit}을 확인해 주세요."
+            B = f"{hi_short}, 혜택을 놓치지 않도록 {benefit}을 안내드립니다."
+        else:  # promo
+            A = f"{hi_short}께 {benefit} 혜택을 준비했습니다."
+            B = f"{hi_short}, 지금 {benefit}을 이용하실 수 있습니다."
+
+    # ---------- 2건(조금 자세한 버전) ----------
+    else:
+        if theme == "care":
+            mid = (rs + " ") if use_reason else ""
+            A = (
+                f"{hi_long} 이용 중 불편을 드려 진심으로 죄송합니다. "
+                f"{mid}사과의 마음으로 {benefit}을 준비했으며 {exp_str}까지 사용 가능합니다."
+            )
+            B = (
+                f"{hi_long} 서비스 이용 과정에서 만족스럽지 못하셨던 부분이 있었던 것 같습니다. "
+                f"{mid}{benefit}을 제공해 드리니, 다시 한번 편하게 이용해 주시면 감사하겠습니다."
+            )
+        elif theme == "winback":
+            mid = (rs + " ") if use_reason else ""
+            A = (
+                f"{hi_long} 요즘 자주 뵙지 못해 먼저 연락드립니다. "
+                f"{mid}다시 방문해 주시는 고객님께 감사의 뜻으로 {benefit}을 드립니다. "
+                f"{exp_str}까지 사용 가능합니다."
+            )
+            B = (
+                f"{hi_long} 한동안 이용이 뜸하셔서 아쉬운 마음에 연락드립니다. "
+                f"{mid}준비된 {benefit}으로 다시 한번 혜택을 경험해 보시면 좋겠습니다."
+            )
+        elif theme == "engage":
+            mid = (rs + " ") if use_reason else ""
+            A = (
+                f"{hi_long} 새 혜택과 이벤트가 업데이트되었습니다. "
+                f"{mid}고객님께 맞는 {benefit}을 마련해 두었으니 {exp_str} 전에 한 번 확인해 주세요."
+            )
+            B = (
+                f"{hi_long} 혜택과 알림을 더 알차게 이용하실 수 있도록 {benefit}을 추가했습니다. "
+                f"{mid}간단히 접속만으로 적용되니 놓치지 마세요. {exp_str}까지입니다."
+            )
+        else:  # promo
+            A = (
+                f"{hi_long} 고객님께 어울리는 {benefit}을 준비했습니다. "
+                f"{exp_str}까지 사용 가능하니 쇼핑에 참고 부탁드립니다."
+            )
+            B = (
+                f"{hi_long} 현재 고객님께 제공되는 {benefit}이 오픈되었습니다. "
+                f"{exp_str} 전까지 자유롭게 사용해 보시고, 부족한 점이 있다면 언제든 알려 주세요."
+            )
+
+    # CTA/추가 정보는 2건일 때 우선 살리고, 길이 초과 시 잘라냄
     url = f" 바로가기: {landing_url}" if landing_url else ""
     cs  = f" 문의: {cs_contact}" if cs_contact else ""
     oo  = f" {optout}" if optout else ""
 
-    # 두 가지 후보
-    vA = A + url + cs + oo
-    vB = B + url + cs + oo
-    return [vA.strip(), vB.strip()]
+    vA = (A + url + cs + oo).strip()
+    vB = (B + url + cs + oo).strip()
+    return [vA, vB]
 
+
+# ──────────────────────
+# 4) 길이 맞춰 깔끔하게 줄이기
+# ──────────────────────
 def fit_to_target(text: str, target_segments: int) -> str:
-    # 길이 초과 시 제거 우선순위: 수신거부 → 문의 → URL → 만료문구 일부 → 인사말 축약
     limit = limit_for_segments(target_segments)
     if len(text) <= limit:
         return text
 
-    # 단계적 축소
     t = text
-    # 1) 수신거부 제거
-    if "수신거부" in t and len(t) > limit:
-        i = t.rfind("수신거부")
-        if i > -1: t = t[:i].strip()
-    # 2) 문의 제거
-    if " 문의:" in t and len(t) > limit:
-        i = t.rfind(" 문의:")
-        if i > -1: t = t[:i].strip()
-    # 3) URL 제거
-    if "바로가기:" in t and len(t) > limit:
-        i = t.rfind("바로가기:")
-        if i > -1: t = t[:i].strip()
-    # 4) 만료문구 줄이기: "만료 YYYY-MM-DD" → "만료 YYYYMMDD"
-    t = t.replace("만료 ", "만료")
-    import re
-    t = re.sub(r"만료(\s*)?(\d{4})-(\d{2})-(\d{2})", r"만료\2\3\4", t)
-    # 5) 인사말 축약: "고객님," → "님,"
-    if len(t) > limit:
-        t = t.replace(" 고객님,", " 님,")
-        t = t.replace(" 고객님,", " 님,")
-    # 마지막 방어: 초과면 절단(말줄임)
-    return t[:limit]
+
+    # 1) 수신거부 / 문의 / URL 순으로 잘라내기
+    for key in [" 수신거부", " 문의:", " 바로가기:"]:
+        if len(t) <= limit:
+            break
+        idx = t.rfind(key)
+        if idx != -1:
+            t = t[:idx].strip()
+
+    if len(t) <= limit:
+        return t
+
+    # 2) 문장 단위로 줄이기
+    sentences = []
+    buf = ""
+    for ch in t:
+        buf += ch
+        if ch in ".!?" or buf.endswith("요.") or buf.endswith("다.") or buf.endswith("니다."):
+            sentences.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        sentences.append(buf.strip())
+
+    if sentences:
+        result = ""
+        for s in sentences:
+            if len((result + " " + s).strip()) <= limit:
+                result = (result + " " + s).strip()
+            else:
+                break
+        if result:
+            t = result
+
+    if len(t) <= limit:
+        return t
+
+    # 3) 마지막 방어: 공백 단위로 잘라내고 말줄임
+    t = t[:limit]
+    last_space = t.rfind(" ")
+    if last_space > 0 and last_space > limit * 0.5:
+        t = t[:last_space]
+    return t.rstrip(" ,.;") + "…"
+
 
 # ──────────────────────
-# 4) 입력 파라미터 UI
+# 5) 입력 파라미터 UI
 # ──────────────────────
-col_left, col_right = st.columns([1,1])
+col_left, col_right = st.columns([1, 1])
 with col_left:
     brand = st.text_input("브랜드명", value="브랜드")
     benefit = st.text_input("혜택(예: 5% 할인, 무료배송, 1만원 쿠폰)", value="5% 할인 쿠폰")
     expiry = st.date_input("혜택 만료일", value=datetime.date.today() + datetime.timedelta(days=7))
     tone = st.selectbox("톤/스타일", ["정중", "친근", "긴급(한정)"], index=0)
 with col_right:
-    theme_choice = st.selectbox("메시지 타입", ["자동 추천","사과/케어","휴면/재활성","참여 활성화","일반 프로모션"], index=0)
+    theme_choice = st.selectbox("메시지 타입", ["자동 추천", "사과/케어", "휴면/재활성", "참여 활성화", "일반 프로모션"], index=0)
     landing_url = st.text_input("랜딩 URL(선택)", value="")
     cs_contact = st.text_input("문의 채널(선택, 예: 080-000-0000 / 챗봇 링크)", value="")
     optout = st.text_input("수신거부 문구(선택)", value="수신거부: 수신중지")
     to_phone = st.text_input("수신번호(To, 선택: Twilio 발송 시 사용)", value="", placeholder="+8210XXXXYYYY")
+
 target_segments = st.radio("목표 길이", ["1건(≤70자)", "2건(≤137자)"], index=0, horizontal=True)
 target_segments = 1 if target_segments.startswith("1") else 2
 
 # ──────────────────────
-# 5) 드라이버 기반 사유 & 타입 선택 → 후보 2개 생성 → 길이에 맞춰 자동 조정
+# 6) 드라이버 기반 사유 & 타입 선택 → 후보 2개 생성 → 길이에 맞춰 자동 조정
 # ──────────────────────
-reasons_natural = top_risk_reasons_natural(drivers) if 'drivers' in locals() and drivers is not None else []
-# 타입 자동 판정
+reasons_natural = top_risk_reasons_natural(drivers) if "drivers" in locals() and drivers is not None else []
+reason_for_sms = reasons_natural[0] if (reasons_natural and target_segments > 1) else None
+
 if theme_choice == "자동 추천":
-    theme = detect_message_theme(drivers) if 'drivers' in locals() and drivers is not None else "promo"
+    theme = detect_message_theme(drivers) if "drivers" in locals() and drivers is not None else "promo"
 else:
-    theme = {"사과/케어":"care","휴면/재활성":"winback","참여 활성화":"engage","일반 프로모션":"promo"}[theme_choice]
+    theme = {
+        "사과/케어": "care",
+        "휴면/재활성": "winback",
+        "참여 활성화": "engage",
+        "일반 프로모션": "promo",
+    }[theme_choice]
 
-# 후보 2개 생성(A/B)
-variants = compose_variants(theme, tone, customer_id, brand, benefit, expiry, landing_url, cs_contact, optout)
+variants = compose_variants(
+    theme=theme,
+    tone=tone,
+    customer_id=customer_id,
+    brand=brand,
+    benefit=benefit,
+    expiry=expiry,
+    landing_url=landing_url,
+    cs_contact=cs_contact,
+    optout=optout,
+    target_segments=target_segments,
+    reason_sentence=reason_for_sms,
+)
 
-# 사유 문구를 한 줄 덧붙이되, 길이 내에서만 추가
-reason_line = ""
-if reasons_natural:
-    # 가장 중요한 사유 1개만 짧게
-    reason_line = f" ({reasons_natural[0]})"
-vA = variants[0] + reason_line
-vB = variants[1] + reason_line
+vA, vB = variants[0], variants[1]
 
-# 길이에 맞게 자동 축소
 best = fit_to_target(vA, target_segments)
 alt  = fit_to_target(vB, target_segments)
 
-# 후보 선택 로직: 더 짧은 쪽 우선
 final_msg = best if len(best) <= len(alt) else alt
 
 # ──────────────────────
-# 6) 편집/미리보기/다운로드
+# 7) 편집/미리보기/다운로드
 # ──────────────────────
 msg = st.text_area("문자 내용(편집 가능)", value=final_msg, height=140)
 seg, remain, nchar = sms_segments_korean(msg)
 st.caption(f"{nchar}자 · 추정 {seg}건(현재 세그먼트 남은 {remain}자)  *UCS-2 기준 70/67 규칙*")
 
-# 추천안 A/B 미리보기
 with st.expander("추천안 A/B 미리보기", expanded=False):
-    st.markdown("**A**")
+    st.markdown("**A 후보**")
     st.code(best, language="text")
-    st.markdown("**B**")
-    st.code(alt,  language="text")
+    st.markdown("**B 후보**")
+    st.code(alt, language="text")
 
-st.download_button("⬇️ TXT로 저장", data=msg.encode("utf-8"), file_name=f"{customer_id}_sms.txt", mime="text/plain")
+st.download_button(
+    "⬇️ TXT로 저장",
+    data=msg.encode("utf-8"),
+    file_name=f"{customer_id}_sms.txt",
+    mime="text/plain",
+)
 
 # ──────────────────────
-# 7) (선택) Twilio 발송
+# 8) (선택) Twilio 발송
 # ──────────────────────
 with st.expander("☁️ Twilio 설정(선택: 설정 시 실제 발송)", expanded=False):
     st.caption("설정 후 아래 버튼으로 실제 문자 발송이 가능합니다. 미설정 시 '문자 생성/복사'만 사용하세요.")
     import os
+
     def _get_secret(name, default=""):
         try:
             return st.secrets.get(name, os.getenv(name, default))

@@ -443,8 +443,8 @@ vip_today_n   = int(min(VIP_TODAY_LIMIT, len(vip_no_benefit)))
 # Layout
 # -------------------------------
 st.title("🧭 고객 이탈 위험 대시보드")
-missing_cnt = int(df.get("CustomerID_clean", pd.Series([np.nan] * len(df))).isna().sum()) if "CustomerID_clean" in df.columns else 0
-st.caption(f"🧹 CustomerID 결측/무효: {missing_cnt} / {len(df):,}")
+# missing_cnt = int(df.get("CustomerID_clean", pd.Series([np.nan] * len(df))).isna().sum()) if "CustomerID_clean" in df.columns else 0
+# st.caption(f"🧹 CustomerID 결측/무효: {missing_cnt} / {len(df):,}")
 
 # 필터 요약
 filter_badges = []

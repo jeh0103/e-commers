@@ -17,7 +17,7 @@ st.set_page_config(page_title="고객 이탈 위험 대시보드", layout="wide"
 DETAIL_PAGE_SLUG = "Customer_Detail"  # 상세 링크에서 사용
 
 # -------------------------------
-# Query-param helpers (new/old Streamlit 모두 지원)
+# Query-param helpers
 # -------------------------------
 def qp_get(name: str):
     """Get query param for both new (st.query_params) and old (experimental_get_) APIs."""
@@ -332,7 +332,7 @@ with st.sidebar:
         if_thr = None
         ae_thr = None
 
-# 👉 리스트 페이지가 동일 조건을 사용하도록 세션에 저장
+# 리스트 페이지가 동일 조건을 사용하도록 세션에 저장
 st.session_state["sel_age"] = sel_age
 st.session_state["sel_gender_labels"] = sel_gender_labels
 st.session_state["premium_opt"] = premium_opt
@@ -443,8 +443,6 @@ vip_today_n   = int(min(VIP_TODAY_LIMIT, len(vip_no_benefit)))
 # Layout
 # -------------------------------
 st.title("🧭 고객 이탈 위험 대시보드")
-# missing_cnt = int(df.get("CustomerID_clean", pd.Series([np.nan] * len(df))).isna().sum()) if "CustomerID_clean" in df.columns else 0
-# st.caption(f"🧹 CustomerID 결측/무효: {missing_cnt} / {len(df):,}")
 
 # 필터 요약
 filter_badges = []
@@ -466,7 +464,7 @@ tabs = st.tabs(["📊 개요", "🔍 고객 조회"])
 # 📊 개요 탭
 # =========================================
 with tabs[0]:
-    # 👉 오늘 우선 관리해야 할 고객 요약 박스
+    # 오늘 우선 관리해야 할 고객 요약 박스
     st.markdown("### 📌 우선 관리 고객")
     st.caption("금일 기준으로 연락·혜택 발송이 필요한 주요 고객 수입니다.")
     cc1, cc2 = st.columns(2)
@@ -480,7 +478,7 @@ with tabs[0]:
     )
     st.caption("※ 현재 화면의 필터(나이/성별/리피트/임계값)와 최근 7일 기준으로 계산됩니다.")
 
-    # 📋 요약표용 CSS: 가로 스크롤 + 헤더/셀 줄바꿈 없음
+    # 요약표용 CSS: 가로 스크롤 + 헤더/셀 줄바꿈 없음
     st.markdown(
         """
 <style>
@@ -597,13 +595,13 @@ with tabs[0]:
                 html_v = styler_v.to_html(escape=False)
                 st.markdown(f"<div class='today-summary-wrap'>{html_v}</div>", unsafe_allow_html=True)
 
-    # 🔧 KPI-구분선-제목 사이 여백 조정 (줄을 위로, 제목과는 여백 확보)
+    # KPI-구분선-제목 사이 여백 조정 (줄을 위로, 제목과는 여백 확보)
     st.markdown(
         "<hr style='margin-top:8px; margin-bottom:22px; opacity:0.22;'>",
         unsafe_allow_html=True
     )
 
-    # 📊 전체 이탈 위험 현황 요약
+    # 전체 이탈 위험 현황 요약
     st.subheader("📊 전체 이탈 위험 현황 요약")
     st.caption("모델이 포착한 이탈 위험 고객 수를 유형별로 나눈 요약입니다.")
 
@@ -625,7 +623,7 @@ with tabs[0]:
         col4.metric("두 기준 모두 위험한 고위험 고객 수", f"{churn_both:,} ({ratio:.2f}%)")
         st.markdown("<a class='kpi-link' href='/Risky_List?src=both' title='고위험 이탈 고객 목록'></a>", unsafe_allow_html=True)
 
-    # 🚨 이탈 위험 고객 리스트 (관리자 친화 버전)
+    # 이탈 위험 고객 리스트
     st.subheader("🚨 이탈 위험 고객 리스트")
     st.caption("이탈 위험 점수가 높은 순으로 정렬된 고객입니다. 고객ID를 클릭하면 상세 화면으로 이동합니다.")
     top_k = st.slider("리스트 크기", min_value=5, max_value=200, value=10, step=5)
@@ -647,7 +645,7 @@ with tabs[0]:
         list_df["RiskScore100"] = compute_risk_score_100(list_df["ChurnRiskScore"])
         list_df["RiskLevel"] = list_df["RiskScore100"].apply(risk_level_from_score)
 
-    # 표에 넣을 컬럼(있는 것만)
+    # 표에 넣을 컬럼
     base_cols = [
         "CustomerID_clean",
         "GenderLabel",
@@ -667,7 +665,7 @@ with tabs[0]:
     if risky_customers.empty:
         st.info("현재 조건에서 표시할 고객이 없습니다.")
     else:
-        # 순위(헤더 없이) + 고객ID 링크
+        # 순위 + 고객ID 링크
         risky_customers.insert(0, "", np.arange(1, len(risky_customers) + 1))
         risky_customers["고객ID"] = risky_customers["CustomerID_clean"].apply(
             lambda cid: f"<a href='/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
@@ -725,7 +723,7 @@ with tabs[0]:
         if risk_score_label in display_df.columns:
             styler = styler.apply(style_risk, axis=0)
 
-        # ✅ 표 가로 스크롤 + 헤더/셀 줄바꿈 없음
+        # 표 가로 스크롤 + 헤더/셀 줄바꿈 없음
         st.markdown(
             """
 <style>
@@ -751,7 +749,7 @@ with tabs[0]:
         html_main = styler.to_html(escape=False)
         st.markdown(f"<div class='risky-wrap'>{html_main}</div>", unsafe_allow_html=True)
 
-        # ✅ CSV 다운로드
+        # CSV 다운로드
         export_df = display_df[display_cols].copy()
         export_df.rename(columns={"": "순위"}, inplace=True)
         if "고객ID" in export_df.columns and "CustomerID" not in export_df.columns:
@@ -780,7 +778,7 @@ with tabs[0]:
             st.dataframe(desc, use_container_width=True)
 
 # =========================================
-# 🔍 고객 조회 탭
+# 고객 조회 탭
 # =========================================
 with tabs[1]:
     st.subheader("고객 ID로 조회")

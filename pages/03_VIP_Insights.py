@@ -263,7 +263,7 @@ cands, snap = select_vip_candidates(
 )
 
 # ---------------------------------------------------------------------
-# 탭 구성 — 화면 구성 유지
+# 탭 구성 
 # ---------------------------------------------------------------------
 tabs = st.tabs(["📌 개요", "🚀 전환 후보", "👑 현재 VIP", "ℹ️ 사용 설명"])
 
@@ -314,7 +314,7 @@ with tabs[0]:
         cC.metric("ROI(%)", f"{roi_val:,.1f}")
 
 # ================================
-# == 전환 후보 탭 (교체된 블록) ==
+# == 전환 후보 탭  ==
 # ================================
 with tabs[1]:
     st.subheader("🚀 전환 후보 리스트")
@@ -324,7 +324,7 @@ with tabs[1]:
         table_css()
         view = cands.copy()
 
-        # (안전) ID 보강 + 표/CSV에서는 ID 없는 행 제외
+        #  ID 보강 + 표/CSV에서는 ID 없는 행 제외
         if "CustomerID_clean" not in view.columns and "CustomerID" in view.columns:
             tmp = view["CustomerID"].astype(str).str.strip()
             tmp = tmp.mask(tmp.str.lower().isin(["", "nan", "none", "null"]))
@@ -405,7 +405,7 @@ with tabs[1]:
                            "vip_candidates.csv", "text/csv")
 
 # =============================
-# == 현재 VIP 탭 (교체된 블록) ==
+# == 현재 VIP 탭 ==
 # =============================
 with tabs[2]:
     st.subheader("👑 현재 VIP 고객")
@@ -415,7 +415,7 @@ with tabs[2]:
         table_css()
         view = vip_df.copy()
 
-        # (안전) ID 보강 + 표/CSV에서는 ID 없는 행 제외
+        # ID 보강 + 표/CSV에서는 ID 없는 행 제외
         if "CustomerID_clean" not in view.columns and "CustomerID" in view.columns:
             tmp = view["CustomerID"].astype(str).str.strip()
             tmp = tmp.mask(tmp.str.lower().isin(["", "nan", "none", "null"]))
@@ -455,7 +455,7 @@ with tabs[2]:
         styler = view[display_cols].style.hide(axis="index").format(fmt)
         st.markdown(styler.set_table_attributes('id="vip_table"').to_html(escape=False), unsafe_allow_html=True)
 
-        # 현재 VIP 표 전용 CSS(고객ID 열 너비 확보)
+        # 현재 VIP 표 전용 CSS
         st.markdown("""
         <style>
         #vip_table th:nth-child(1), #vip_table td:nth-child(1) { min-width: 120px; }

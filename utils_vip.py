@@ -119,7 +119,7 @@ def compute_vip_propensity_score(
 def select_vip_candidates(
     df_scored: pd.DataFrame,
     id_col: str = "CustomerID_clean",
-    mode: str = "threshold",             # "threshold" | "topk"
+    mode: str = "threshold",             
     k: int = 100,
     thr: float = 80.0,
     coverage_min_n: int = 3,

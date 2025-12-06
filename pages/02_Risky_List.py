@@ -176,7 +176,7 @@ if sort_metric in filtered.columns:
         f"{delta_pct:+.1f}% vs 전체"
     )
 
-# ===== 한글 폰트 자동 설정 (그래프용) =====
+# ===== 한글 폰트 자동 설정 =====
 def _set_korean_font_if_available():
     try:
         import matplotlib.pyplot as plt
@@ -408,7 +408,7 @@ top_sub["__priority_html__"] = [
     for i, idx in enumerate(top_sub["__priority_idx__"])
 ]
 
-# ===== 표 구성 (관리자 친화)
+# ===== 표 구성 
 desired = [
     "CustomerID_clean","GenderLabel","__priority_idx__","__priority_html__",
     "ChurnRiskScore","IF_AnomalyScore","AE_ReconError",

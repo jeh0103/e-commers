@@ -115,8 +115,8 @@ except Exception:
     st.markdown("[🏠 대시보드로](/)")
 
 TITLE = {
-    "if":   "IsolationForest 이탈 고객",
-    "ae":   "Autoencoder 이탈 고객",
+    "if":   "이상행동 기반 이탈 의심 고객",
+    "ae":   "패턴 변화 기반 이탈 의심 고객",
     "both": "공통 이탈 고객(고신뢰군)"
 }
 st.title(f"🗂️ {TITLE.get(src, '고객 리스트')}")

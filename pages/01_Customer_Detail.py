@@ -155,19 +155,37 @@ def ensure_gender_label(df: pd.DataFrame,
 # -------------------------------
 @st.cache_data(show_spinner=False)
 def load_main():
-    df = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
+    try:
+        df = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
+    except Exception:
+        return None
+
+    # CustomerID_clean 보장: CustomerID가 없으면 CUST00001~ 자동 생성
     if "CustomerID" in df.columns:
         def _clean(x):
-            if pd.isna(x): return np.nan
+            if pd.isna(x):
+                return np.nan
             s = str(x).strip()
             return np.nan if (s == "" or s.lower() in {"nan", "none", "nat", "null"}) else s
         df["CustomerID_clean"] = df["CustomerID"].map(_clean)
+    else:
+        df["CustomerID_clean"] = pd.Series(np.arange(1, len(df) + 1)).map(lambda i: f"CUST{i:05d}")
+
+    # 혹시라도 결측이 남아있으면 행 순서 기반 ID로 보완
+    if "CustomerID_clean" in df.columns:
+        mask_bad = df["CustomerID_clean"].isna() | df["CustomerID_clean"].astype(str).str.strip().eq("")
+        if mask_bad.any():
+            fallback = pd.Series(np.arange(1, len(df) + 1), index=df.index).map(lambda i: f"CUST{i:05d}")
+            df.loc[mask_bad, "CustomerID_clean"] = fallback.loc[mask_bad]
 
     # 성별 라벨 보장
     df = ensure_gender_label(df)
     return df
 
 df = load_main()
+if df is None or df.empty:
+    st.error("메인 데이터(ecommerce_customer_churn_hybrid_with_id.csv)를 불러오지 못했습니다. 파일 경로/이름을 확인하세요.")
+    st.stop()
 
 def exists(c): return c in df.columns
 def p99(x: pd.Series) -> float:
@@ -272,17 +290,65 @@ with g1:
 
 with g2:
     st.subheader("상태 요약")
-    if all(exists(c) for c in ["Both_ChurnFlag","IF_ChurnFlag","AE_ChurnFlag"]):
-        if int(row["Both_ChurnFlag"]) == 1:
-            st.error("고신뢰 이탈 고객 (이상행동·패턴변화 모두 위험)")
-        elif int(row["IF_ChurnFlag"]) == 1:
-            st.warning("불만/이상행동 기반 이탈 신호")
-        elif int(row["AE_ChurnFlag"]) == 1:
-            st.info("이용 패턴 감소 기반 이탈 신호")
-        else:
-            st.success("특이 신호 없음")
+
+    # 고객유형(클러스터) 표시: A/B 같은 접두어는 제거
+    cluster_raw = None
+    if exists("BehaviorClusterName"):
+        cluster_raw = row.get("BehaviorClusterName")
+    elif exists("BehaviorCluster"):
+        cluster_raw = row.get("BehaviorCluster")
+
+    def _clean_cluster_name(x):
+        if x is None or (isinstance(x, float) and np.isnan(x)):
+            return "미분류"
+        s = str(x).strip()
+        if ":" in s:
+            left, right = s.split(":", 1)
+            if len(left.strip()) <= 3:
+                return right.strip()
+        return s
+
+    customer_type = _clean_cluster_name(cluster_raw)
+
+    # 이탈 신호 요약(짧게)
+    has_flags = all(exists(c) for c in ["Both_ChurnFlag", "IF_ChurnFlag", "AE_ChurnFlag"])
+    both = int(row.get("Both_ChurnFlag", 0)) if has_flags else 0
+    if_flag = int(row.get("IF_ChurnFlag", 0)) if has_flags else 0
+    ae_flag = int(row.get("AE_ChurnFlag", 0)) if has_flags else 0
+
+    if not has_flags:
+        badge, msg, signals = "정보부족", "이탈 신호를 계산할 수 없음", ""
+        bg, border = "rgba(255,255,255,0.04)", "rgba(255,255,255,0.12)"
+    elif both == 1:
+        badge, msg, signals = "고신뢰 이탈", "즉시 관리 필요", "이상행동 + 패턴변화"
+        bg, border = "rgba(255, 75, 75, 0.14)", "rgba(255, 75, 75, 0.35)"
+    elif if_flag == 1:
+        badge, msg, signals = "주의", "불만/이상행동 신호", "이상행동"
+        bg, border = "rgba(255, 193, 7, 0.14)", "rgba(255, 193, 7, 0.35)"
+    elif ae_flag == 1:
+        badge, msg, signals = "관찰", "이용 패턴 감소 신호", "패턴변화"
+        bg, border = "rgba(3, 169, 244, 0.14)", "rgba(3, 169, 244, 0.35)"
     else:
-        st.caption("이탈 플래그 컬럼이 없어 상태를 계산할 수 없습니다.")
+        badge, msg, signals = "정상", "특이 신호 없음", ""
+        bg, border = "rgba(76, 175, 80, 0.12)", "rgba(76, 175, 80, 0.30)"
+
+    signal_line = f"신호: {signals}" if signals else ""
+
+    st.markdown(
+        f"""
+        <div style="padding:14px 14px; border-radius:14px; border:1px solid {border}; background:{bg};">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+            <div style="font-size:18px; font-weight:800;">🧩 {customer_type}</div>
+            <div style="font-size:12px; padding:4px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.18); background:rgba(0,0,0,0.10);">
+              {badge}
+            </div>
+          </div>
+          <div style="margin-top:8px; font-size:14px; font-weight:700;">{msg}</div>
+          <div style="margin-top:4px; font-size:12px; opacity:0.85;">{signal_line}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # -------------------------------
 # 활동/만족 지표 - 전체 대비 분위 & 리스크 시각화
@@ -506,7 +572,7 @@ if driver_cols and exists("Both_ChurnFlag"):
                 f"- **권장 액션**: {action}"
             )
 
-    # 2) 상세 테이블(Top 5) – 텍스트로 영향 정도만 표시
+    # 2) 상세 테이블(Top 5) – 숫자 z점수 대신 텍스트로 영향 정도만 표시
     rows_drv = []
     for feat, zval in list(drivers.items())[:5]:
         zval = float(zval)
@@ -549,11 +615,12 @@ else:
     st.info("드라이버 분석을 위한 컬럼/정상군 기준이 부족합니다.")
 
 # -------------------------------
-# 📬 맞춤 문자 생성 / 발송 
+# 📬 맞춤 문자 생성 / 발송 (개선본)
 # -------------------------------
 st.markdown("---")
 st.subheader("📨 맞춤 문자 생성/발송")
 
+# ----- 이하 SMS 부분은 동일 -----
 import math
 
 def sms_segments_korean(text: str):

@@ -101,12 +101,25 @@ def ensure_gender_label(df_hybrid: pd.DataFrame,
 @st.cache_data(show_spinner=False)
 def load_data():
     base = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
-    if "CustomerID" in base.columns:
-        def _clean_id(x):
-            if pd.isna(x): return np.nan
-            s = str(x).strip()
-            return np.nan if (s=="" or s.lower() in {"nan","none","nat","null"}) else s
-        base["CustomerID_clean"] = base["CustomerID"].map(_clean_id)
+
+    # ✅ CustomerID / CustomerID_clean 보장 (원본 CSV에 ID가 없거나 비어있는 경우 대비)
+    if "CustomerID" not in base.columns:
+        base["CustomerID"] = [f"CUST{(i+1):05d}" for i in range(len(base))]
+
+    def _clean_id(x):
+        if pd.isna(x): return np.nan
+        s = str(x).strip()
+        return np.nan if (s=="" or s.lower() in {"nan","none","nat","null"}) else s
+
+    base["CustomerID_clean"] = base["CustomerID"].map(_clean_id)
+
+    # 일부 행만 ID가 비어있는 경우도 처리
+    if base["CustomerID_clean"].isna().any():
+        auto_ids = pd.Series([f"CUST{(i+1):05d}" for i in range(len(base))], index=base.index)
+        m = base["CustomerID_clean"].isna()
+        base.loc[m, "CustomerID"] = auto_ids[m]
+        base.loc[m, "CustomerID_clean"] = auto_ids[m]
+
     base = ensure_gender_label(base)
 
     # 추가 피처 조인(있을 때만)
@@ -240,9 +253,15 @@ pf_cut  = qv(filtered["PurchaseFrequency"], pf_q) if "PurchaseFrequency" in filt
 mask_clv = filtered["CustomerLifetimeValue"] >= (clv_cut if clv_cut is not None else -np.inf) if "CustomerLifetimeValue" in filtered.columns else False
 mask_pf  = filtered["PurchaseFrequency"]   >= (pf_cut  if pf_cut  is not None else -np.inf) if "PurchaseFrequency" in filtered.columns else False
 vip_mask = (mask_clv & mask_pf) if str(logic).startswith("AND") else (mask_clv | mask_pf)
-vip_df = filtered[vip_mask].copy()
+vip_df_all = filtered[vip_mask].copy()
+vip_total = len(vip_df_all)
 
-# 운영 원칙: 현재 VIP 표에서도 NaN ID 제외(링크/CSV 무의미)
+vip_linkable = 0
+if "CustomerID_clean" in vip_df_all.columns:
+    vip_linkable = int(vip_df_all["CustomerID_clean"].notna().sum())
+
+# 운영 원칙: 현재 VIP 표/CSV는 ID가 있는 고객만 표시(링크/CSV 무의미한 행 제거)
+vip_df = vip_df_all.copy()
 if "CustomerID_clean" in vip_df.columns:
     vip_df = vip_df[vip_df["CustomerID_clean"].notna()]
 
@@ -263,19 +282,24 @@ cands, snap = select_vip_candidates(
 )
 
 # ---------------------------------------------------------------------
-# 탭 구성 
+# 탭 구성 — 화면 구성 유지
 # ---------------------------------------------------------------------
 tabs = st.tabs(["📌 개요", "🚀 전환 후보", "👑 현재 VIP", "ℹ️ 사용 설명"])
 
 # == 개요 탭 ==
 with tabs[0]:
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("전환 후보 수", f"{len(cands):,}")
-    col2.metric("현재 VIP 수", f"{len(vip_df):,}")
-    bt = backtest_metrics(scored_full, score_col="VIP잠재지수", label_col=None,
-                          k=min(100, max(1, len(scored_full)//20)))
-    col3.metric("Precision@K(프락시)", f"{bt['precision_at_k']*100:.1f}%")
-    col4.metric("Lift@K(프락시)", f"{bt['lift_at_k']:.2f}x")
+    col1.metric("전환 후보 수", f"{len(cands):,}명")
+    col2.metric("현재 VIP 수", f"{vip_total:,}명")
+    missing_vip = int(max(0, vip_total - vip_linkable))
+    if missing_vip > 0:
+        col2.caption(f"⚠️ 상세 조회 불가 {missing_vip:,}명 (고객ID 누락)")
+
+    k_eval = min(100, max(1, len(scored_full)//20))
+    bt = backtest_metrics(scored_full, score_col="VIP잠재지수", label_col=None, k=k_eval)
+    col3.metric("예상 전환 성공률", f"{bt['precision_at_k']*100:.1f}%")
+    col4.metric("선별 효율(전체 대비)", f"{bt['lift_at_k']:.2f}배")
+    st.caption(f"※ 위 2개 지표는 상위 {k_eval}명 기준이며, 실제 전환 데이터가 없으면 행동지표 기반 추정치입니다.")
 
     roi = roi_for_k(scored_full, k=min(100, len(scored_full)),
                     avg_order_value=50000, gross_margin=0.35, cost_per_contact=1000)
@@ -314,7 +338,7 @@ with tabs[0]:
         cC.metric("ROI(%)", f"{roi_val:,.1f}")
 
 # ================================
-# == 전환 후보 탭  ==
+# == 전환 후보 탭 (교체된 블록) ==
 # ================================
 with tabs[1]:
     st.subheader("🚀 전환 후보 리스트")
@@ -324,7 +348,7 @@ with tabs[1]:
         table_css()
         view = cands.copy()
 
-        #  ID 보강 + 표/CSV에서는 ID 없는 행 제외
+        # (안전) ID 보강 + 표/CSV에서는 ID 없는 행 제외
         if "CustomerID_clean" not in view.columns and "CustomerID" in view.columns:
             tmp = view["CustomerID"].astype(str).str.strip()
             tmp = tmp.mask(tmp.str.lower().isin(["", "nan", "none", "null"]))
@@ -405,7 +429,7 @@ with tabs[1]:
                            "vip_candidates.csv", "text/csv")
 
 # =============================
-# == 현재 VIP 탭 ==
+# == 현재 VIP 탭 (교체된 블록) ==
 # =============================
 with tabs[2]:
     st.subheader("👑 현재 VIP 고객")
@@ -415,7 +439,7 @@ with tabs[2]:
         table_css()
         view = vip_df.copy()
 
-        # ID 보강 + 표/CSV에서는 ID 없는 행 제외
+        # (안전) ID 보강 + 표/CSV에서는 ID 없는 행 제외
         if "CustomerID_clean" not in view.columns and "CustomerID" in view.columns:
             tmp = view["CustomerID"].astype(str).str.strip()
             tmp = tmp.mask(tmp.str.lower().isin(["", "nan", "none", "null"]))
@@ -455,7 +479,7 @@ with tabs[2]:
         styler = view[display_cols].style.hide(axis="index").format(fmt)
         st.markdown(styler.set_table_attributes('id="vip_table"').to_html(escape=False), unsafe_allow_html=True)
 
-        # 현재 VIP 표 전용 CSS
+        # 현재 VIP 표 전용 CSS(고객ID 열 너비 확보)
         st.markdown("""
         <style>
         #vip_table th:nth-child(1), #vip_table td:nth-child(1) { min-width: 120px; }
@@ -484,7 +508,7 @@ with tabs[3]:
   1) `CustomerID`가 NaN이면 **리스트/CSV/링크에서 제외**(필요 시 통계에는 포함 가능).  
   2) 핵심지표 NaN은 **있는 지표만**으로 계산하며, coverage로 **자연 감점**.
 - **추천 혜택**: 고객 패턴(고가구매/자주구매/참여형/앱저활성/재구매지연)에 맞춘 **전환 액션**을 제공합니다.
-- **KPI(라벨 없는 환경용 프락시)**: Precision@K, Lift@K, 예상 ROI를 참고 지표로 제시합니다.
+- **KPI(추정치)**: 예상 전환 성공률, 선별 효율(전체 대비), 예상 ROI를 참고 지표로 제시합니다.
 """)
 
     # ── 전략 시뮬레이터 안내(도움말 탭에 포함)

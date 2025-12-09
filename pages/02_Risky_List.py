@@ -75,15 +75,28 @@ def ensure_gender_label(df_hybrid: pd.DataFrame,
 @st.cache_data(show_spinner=False)
 def load_main():
     df = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
+
+    # CustomerID_clean 보장
+    def _clean_id(x):
+        if pd.isna(x):
+            return np.nan
+        s = str(x).strip()
+        return np.nan if (s == "" or s.lower() in {"nan", "none", "nat", "null"}) else s
+
     if "CustomerID" in df.columns:
-        def _clean_id(x):
-            if pd.isna(x): return np.nan
-            s = str(x).strip()
-            return np.nan if (s == "" or s.lower() in {"nan","none","nat","null"}) else s
         df["CustomerID_clean"] = df["CustomerID"].map(_clean_id)
+    else:
+        df["CustomerID_clean"] = np.nan
+
+    # ✅ 원본에 ID가 없거나(또는 결측) 전부 비면: CUST00001~ 임시 생성
+    if df["CustomerID_clean"].isna().all() or df["CustomerID_clean"].isna().any():
+        generated = pd.Series(np.arange(1, len(df) + 1), index=df.index).map(lambda i: f"CUST{i:05d}")
+        df["CustomerID_clean"] = df["CustomerID_clean"].fillna(generated)
+        if "CustomerID" not in df.columns:
+            df["CustomerID"] = df["CustomerID_clean"]
+
     df = ensure_gender_label(df)
     return df
-
 df = load_main()
 
 # ===== 전역 필터/임계값 세션 값 재사용 =====
@@ -176,7 +189,7 @@ if sort_metric in filtered.columns:
         f"{delta_pct:+.1f}% vs 전체"
     )
 
-# ===== 한글 폰트 자동 설정 =====
+# ===== 한글 폰트 자동 설정 (그래프용) =====
 def _set_korean_font_if_available():
     try:
         import matplotlib.pyplot as plt
@@ -408,7 +421,7 @@ top_sub["__priority_html__"] = [
     for i, idx in enumerate(top_sub["__priority_idx__"])
 ]
 
-# ===== 표 구성 
+# ===== 표 구성 (관리자 친화)
 desired = [
     "CustomerID_clean","GenderLabel","__priority_idx__","__priority_html__",
     "ChurnRiskScore","IF_AnomalyScore","AE_ReconError",

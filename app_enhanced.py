@@ -17,7 +17,7 @@ st.set_page_config(page_title="고객 이탈 위험 대시보드", layout="wide"
 DETAIL_PAGE_SLUG = "Customer_Detail"  # 상세 링크에서 사용
 
 # -------------------------------
-# Query-param helpers
+# Query-param helpers (new/old Streamlit 모두 지원)
 # -------------------------------
 def qp_get(name: str):
     """Get query param for both new (st.query_params) and old (experimental_get_) APIs."""
@@ -153,9 +153,13 @@ def ensure_gender_label(
 # -------------------------------
 @st.cache_data(show_spinner=False)
 def load_main():
-    df = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
+    """메인 하이브리드 데이터 로드 (CustomerID_clean/성별 라벨 보장)."""
+    try:
+        df = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
+    except Exception:
+        return None
 
-    # CustomerID 클린 컬럼 생성: 공백/문자열 'nan'/'None'/'null' 등 제거
+    # CustomerID_clean 보장: CSV에 CustomerID가 없으면 CUST00001~ 자동 생성
     if "CustomerID" in df.columns:
         def _clean_id(x):
             if pd.isna(x):
@@ -163,6 +167,15 @@ def load_main():
             s = str(x).strip()
             return np.nan if (s == "" or s.lower() in {"nan", "none", "nat", "null"}) else s
         df["CustomerID_clean"] = df["CustomerID"].map(_clean_id)
+    else:
+        df["CustomerID_clean"] = pd.Series(np.arange(1, len(df) + 1)).map(lambda i: f"CUST{i:05d}")
+
+    # 혹시라도 결측이 남아있으면(부분 누락 케이스) 행 순서 기반 ID로 보완
+    if "CustomerID_clean" in df.columns:
+        mask_bad = df["CustomerID_clean"].isna() | df["CustomerID_clean"].astype(str).str.strip().eq("")
+        if mask_bad.any():
+            fallback = pd.Series(np.arange(1, len(df) + 1), index=df.index).map(lambda i: f"CUST{i:05d}")
+            df.loc[mask_bad, "CustomerID_clean"] = fallback.loc[mask_bad]
 
     # 성별 라벨 보장(원본 조인 + 코드 보완)
     df = ensure_gender_label(df)
@@ -172,18 +185,29 @@ def load_main():
 
 @st.cache_data(show_spinner=False)
 def load_featured():
+    """피처 엔지니어링 데이터 로드 (CustomerID_clean 보장)."""
     try:
         dff = pd.read_csv("ecommerce_customer_data_featured.csv")
-        if "CustomerID" in dff.columns:
-            def _clean_id(x):
-                if pd.isna(x):
-                    return np.nan
-                s = str(x).strip()
-                return np.nan if (s == "" or s.lower() in {"nan", "none", "nat", "null"}) else s
-            dff["CustomerID_clean"] = dff["CustomerID"].map(_clean_id)
-        return dff
     except Exception:
         return None
+
+    if "CustomerID" in dff.columns:
+        def _clean_id(x):
+            if pd.isna(x):
+                return np.nan
+            s = str(x).strip()
+            return np.nan if (s == "" or s.lower() in {"nan", "none", "nat", "null"}) else s
+        dff["CustomerID_clean"] = dff["CustomerID"].map(_clean_id)
+    else:
+        dff["CustomerID_clean"] = pd.Series(np.arange(1, len(dff) + 1)).map(lambda i: f"CUST{i:05d}")
+
+    if "CustomerID_clean" in dff.columns:
+        mask_bad = dff["CustomerID_clean"].isna() | dff["CustomerID_clean"].astype(str).str.strip().eq("")
+        if mask_bad.any():
+            fallback = pd.Series(np.arange(1, len(dff) + 1), index=dff.index).map(lambda i: f"CUST{i:05d}")
+            dff.loc[mask_bad, "CustomerID_clean"] = fallback.loc[mask_bad]
+
+    return dff
 
 
 # actions.db 로드
@@ -206,7 +230,14 @@ def load_actions():
 
 
 df = load_main()
+if df is None or df.empty:
+    st.error("메인 데이터(ecommerce_customer_churn_hybrid_with_id.csv)를 불러오지 못했습니다. 파일 경로/이름을 확인하세요.")
+    st.stop()
+
 dff = load_featured()
+if dff is None:
+    st.warning("피처 데이터(ecommerce_customer_data_featured.csv)를 불러오지 못했습니다. 일부 상세 지표가 생략될 수 있습니다.")
+
 actions_df = load_actions()
 
 # -------------------------------
@@ -443,6 +474,8 @@ vip_today_n   = int(min(VIP_TODAY_LIMIT, len(vip_no_benefit)))
 # Layout
 # -------------------------------
 st.title("🧭 고객 이탈 위험 대시보드")
+# missing_cnt = int(df.get("CustomerID_clean", pd.Series([np.nan] * len(df))).isna().sum()) if "CustomerID_clean" in df.columns else 0
+# st.caption(f"🧹 CustomerID 결측/무효: {missing_cnt} / {len(df):,}")
 
 # 필터 요약
 filter_badges = []
@@ -464,7 +497,7 @@ tabs = st.tabs(["📊 개요", "🔍 고객 조회"])
 # 📊 개요 탭
 # =========================================
 with tabs[0]:
-    # 오늘 우선 관리해야 할 고객 요약 박스
+    # 우선 관리해야 할 고객 요약 박스
     st.markdown("### 📌 우선 관리 고객")
     st.caption("금일 기준으로 연락·혜택 발송이 필요한 주요 고객 수입니다.")
     cc1, cc2 = st.columns(2)
@@ -478,7 +511,7 @@ with tabs[0]:
     )
     st.caption("※ 현재 화면의 필터(나이/성별/리피트/임계값)와 최근 7일 기준으로 계산됩니다.")
 
-    # 요약표용 CSS: 가로 스크롤 + 헤더/셀 줄바꿈 없음
+    # 📋 요약표용 CSS: 가로 스크롤 + 헤더/셀 줄바꿈 없음
     st.markdown(
         """
 <style>
@@ -595,7 +628,101 @@ with tabs[0]:
                 html_v = styler_v.to_html(escape=False)
                 st.markdown(f"<div class='today-summary-wrap'>{html_v}</div>", unsafe_allow_html=True)
 
-    # KPI-구분선-제목 사이 여백 조정 (줄을 위로, 제목과는 여백 확보)
+    
+    # -------------------------------
+    # 🧩 고객유형 분포 (행동 패턴 기반 클러스터)
+    # -------------------------------
+    if ("BehaviorClusterName" in filtered.columns) or ("BehaviorCluster" in filtered.columns):
+        st.subheader("🧩 고객유형 분포")
+        st.caption("전역 필터가 반영된 분포입니다.")
+
+        cluster_col = "BehaviorClusterName" if "BehaviorClusterName" in filtered.columns else "BehaviorCluster"
+        tmp = filtered.copy()
+        tmp[cluster_col] = tmp[cluster_col].fillna("미분류").astype(str)
+
+        # A:, B: 같은 접두어 제거
+        def _clean_cluster_name(x: str) -> str:
+            s = str(x).strip()
+            if ":" in s:
+                left, right = s.split(":", 1)
+                # 왼쪽이 코드(A/B/1 등)처럼 보이면 제거
+                if len(left.strip()) <= 3:
+                    return right.strip()
+            return s
+
+        tmp["고객유형"] = tmp[cluster_col].map(_clean_cluster_name)
+
+        # 위험도(0~100) 계산(가능할 때만)
+        if "ChurnRiskScore" in tmp.columns:
+            tmp["_RiskScore100"] = compute_risk_score_100(tmp["ChurnRiskScore"])
+        else:
+            tmp["_RiskScore100"] = np.nan
+
+        grp = tmp.groupby("고객유형", dropna=False)
+        summary = pd.DataFrame({
+            "고객 수": grp.size(),
+            "비중(%)": grp.size() / max(len(tmp), 1) * 100.0,
+            "평균 이탈 위험 점수(0~100)": grp["_RiskScore100"].mean(),
+        })
+
+        if flag_col and (flag_col in tmp.columns):
+            summary["고신뢰 이탈(%)"] = grp[flag_col].mean() * 100.0
+        else:
+            summary["고신뢰 이탈(%)"] = np.nan
+
+        summary = summary.reset_index()
+
+        # 정렬: 이탈율 높은 순 → 평균 위험도 → 고객 수
+        sort_cols = ["고신뢰 이탈(%)", "평균 이탈 위험 점수(0~100)", "고객 수"]
+        summary = summary.sort_values(sort_cols, ascending=[False, False, False], na_position="last")
+
+        # 보기용 포맷(표시만 문자열로)
+        view = summary.copy()
+        view["고객 수"] = view["고객 수"].astype(int)
+        view["비중(%)"] = view["비중(%)"].map(lambda x: f"{x:.1f}%")
+        view["평균 이탈 위험 점수(0~100)"] = view["평균 이탈 위험 점수(0~100)"].map(
+            lambda x: "-" if pd.isna(x) else f"{x:,.0f}"
+        )
+        view["고신뢰 이탈(%)"] = view["고신뢰 이탈(%)"].map(
+            lambda x: "-" if pd.isna(x) else f"{x:.1f}%"
+        )
+
+        # 표 인덱스 1부터
+        view.index = np.arange(1, len(view) + 1)
+
+        # Streamlit 버전에 따라 "행 선택 → 페이지 이동" 지원
+        moved = False
+        try:
+            event = st.dataframe(
+                view[["고객유형", "고객 수", "비중(%)", "평균 이탈 위험 점수(0~100)", "고신뢰 이탈(%)"]],
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="single-row",
+            )
+            sel = getattr(event, "selection", None)
+            sel_rows = sel.rows if sel is not None else []
+            if sel_rows:
+                pos = int(sel_rows[0])
+                customer_type = str(summary.iloc[pos]["고객유형"])
+                st.session_state["selected_customer_type"] = customer_type
+                qp_set(customer_type=customer_type)
+
+                if os.path.exists("pages/04_Customer_Type_List.py"):
+                    st.switch_page("pages/04_Customer_Type_List.py")
+                else:
+                    st.error("pages/04_Customer_Type_List.py 파일이 없습니다. pages 폴더에 추가해 주세요.")
+                moved = True
+        except TypeError:
+            st.dataframe(
+                view[["고객유형", "고객 수", "비중(%)", "평균 이탈 위험 점수(0~100)", "고신뢰 이탈(%)"]],
+                use_container_width=True
+            )
+
+        if not moved:
+            st.caption("※ 표는 클릭/선택 시 목록 페이지로 이동합니다.")
+
+
+# KPI-구분선-제목 사이 여백 조정 
     st.markdown(
         "<hr style='margin-top:8px; margin-bottom:22px; opacity:0.22;'>",
         unsafe_allow_html=True
@@ -623,7 +750,7 @@ with tabs[0]:
         col4.metric("두 기준 모두 위험한 고위험 고객 수", f"{churn_both:,} ({ratio:.2f}%)")
         st.markdown("<a class='kpi-link' href='/Risky_List?src=both' title='고위험 이탈 고객 목록'></a>", unsafe_allow_html=True)
 
-    # 이탈 위험 고객 리스트
+    # 🚨 이탈 위험 고객 리스트 (관리자 친화 버전)
     st.subheader("🚨 이탈 위험 고객 리스트")
     st.caption("이탈 위험 점수가 높은 순으로 정렬된 고객입니다. 고객ID를 클릭하면 상세 화면으로 이동합니다.")
     top_k = st.slider("리스트 크기", min_value=5, max_value=200, value=10, step=5)
@@ -645,7 +772,7 @@ with tabs[0]:
         list_df["RiskScore100"] = compute_risk_score_100(list_df["ChurnRiskScore"])
         list_df["RiskLevel"] = list_df["RiskScore100"].apply(risk_level_from_score)
 
-    # 표에 넣을 컬럼
+    # 표에 넣을 컬럼(있는 것만)
     base_cols = [
         "CustomerID_clean",
         "GenderLabel",
@@ -665,7 +792,7 @@ with tabs[0]:
     if risky_customers.empty:
         st.info("현재 조건에서 표시할 고객이 없습니다.")
     else:
-        # 순위 + 고객ID 링크
+        # 순위(헤더 없이) + 고객ID 링크
         risky_customers.insert(0, "", np.arange(1, len(risky_customers) + 1))
         risky_customers["고객ID"] = risky_customers["CustomerID_clean"].apply(
             lambda cid: f"<a href='/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
@@ -749,7 +876,7 @@ with tabs[0]:
         html_main = styler.to_html(escape=False)
         st.markdown(f"<div class='risky-wrap'>{html_main}</div>", unsafe_allow_html=True)
 
-        # CSV 다운로드
+        # ✅ CSV 다운로드
         export_df = display_df[display_cols].copy()
         export_df.rename(columns={"": "순위"}, inplace=True)
         if "고객ID" in export_df.columns and "CustomerID" not in export_df.columns:
@@ -778,7 +905,7 @@ with tabs[0]:
             st.dataframe(desc, use_container_width=True)
 
 # =========================================
-# 고객 조회 탭
+# 🔍 고객 조회 탭
 # =========================================
 with tabs[1]:
     st.subheader("고객 ID로 조회")

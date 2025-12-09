@@ -11,13 +11,13 @@ import streamlit as st
 
 st.set_page_config(page_title="고객유형 고객 목록", layout="wide")
 
-DETAIL_PAGE_SLUG = "Customer_Detail"  # pages/01_Customer_Detail.py → /Customer_Detail
+DETAIL_PAGE_SLUG = "Customer_Detail" 
 ACTIONS_LOOKBACK_DAYS = 7
 ACTIONS_BENEFIT_KEYWORDS = ["쿠폰", "혜택", "VIP"]
 
 
 # -------------------------------
-# Query-param helpers (new/old Streamlit 호환)
+# Query-param helpers 
 # -------------------------------
 def qp_get(name: str):
     try:
@@ -91,7 +91,7 @@ def ensure_customer_id_clean(df: pd.DataFrame) -> pd.DataFrame:
             return np.nan if (s == "" or s.lower() in {"nan", "none", "nat", "null"}) else s
         out["CustomerID_clean"] = out["CustomerID"].map(_clean)
     else:
-        out["CustomerID_clean"] = pd.Series(np.arange(1, len(out) + 1)).map(lambda i: f"CUST{i:05d}")
+        out["CustomerID_clean"] = pd.Series(np.arange(1, len(out) + 1), index=out.index).map(lambda i: f"CUST{i:05d}")
 
     mask_bad = out["CustomerID_clean"].isna() | out["CustomerID_clean"].astype(str).str.strip().eq("")
     if mask_bad.any():
@@ -191,7 +191,6 @@ df["고객유형"] = df[cluster_col].map(clean_customer_type)
 try:
     st.page_link("app_enhanced.py", label="← 대시보드로", icon="🏠")
 except Exception:
-    # 구버전 호환: 링크 버튼이 없으면 텍스트 링크
     st.markdown("[← 대시보드로](/)")
 
 st.title("🧩 고객유형 고객 목록")
@@ -208,7 +207,6 @@ qp_set(customer_type=sel_type)
 
 st.caption(
     "이 표는 **해당 고객유형 내부에서 이탈 위험이 높은 순**으로 정렬됩니다. "
-    "관리자는 여기서 '누구를 먼저 연락/혜택 대상으로 볼지'를 빠르게 정할 수 있어야 합니다."
 )
 
 # -------------------------------
@@ -278,16 +276,15 @@ for col, label, direction in key_cols:
         delta_txt = f"{delta:+.0f}%"
     rows.append((abs(delta), label, b_mean, a_mean, delta_txt, direction))
 
+st.markdown("#### ✅ 이 유형의 눈에 띄는 특징(전체 대비)")
 if rows:
     rows.sort(reverse=True)
     top = rows[:3]
     bullets = []
     for _, label, b_mean, a_mean, delta_txt, direction in top:
         bullets.append(f"- **{label}**: 유형 평균 {b_mean:.2f} (전체 대비 {delta_txt}) · {direction}")
-    st.markdown("#### 👀 이 유형의 눈에 띄는 특징(전체 대비)")
     st.markdown("\n".join(bullets))
 else:
-    st.markdown("#### 👀 이 유형의 눈에 띄는 특징(전체 대비)")
     st.caption("비교할 수 있는 핵심 지표가 부족합니다.")
 
 
@@ -316,11 +313,18 @@ if only_no_contact:
 if "이탈 위험 점수(0~100)" in view_df.columns:
     view_df = view_df[pd.to_numeric(view_df["이탈 위험 점수(0~100)"], errors="coerce").fillna(0) >= float(min_risk)]
 
+# ✅ 나이: 소수점 제거(반올림) → nullable int
+age_series = pd.to_numeric(view_df.get("Age", np.nan), errors="coerce").round(0)
+try:
+    age_series = age_series.astype("Int64")
+except Exception:
+    pass
+
 # 표시 컬럼 구성(고객ID 최우선)
 out = pd.DataFrame({
     "고객ID": view_df["CustomerID_clean"].astype(str),
     "성별": view_df.get("GenderLabel", "미상"),
-    "나이": view_df.get("Age", np.nan),
+    "나이": age_series,
     "리피트/프리미엄": view_df.get("RepeatAndPremiumFlag", np.nan),
     "최근 7일 연락": view_df["최근 7일 연락"].map({True: "✅", False: "—"}),
     "최근 7일 혜택": view_df["최근 7일 혜택"].map({True: "✅", False: "—"}),
@@ -344,6 +348,7 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     column_config={
+        "나이": st.column_config.NumberColumn("나이", format="%.0f"),
         "이탈 위험 점수(0~100)": st.column_config.NumberColumn(format="%.0f"),
         "상세": st.column_config.LinkColumn("상세", display_text="보기"),
     },

@@ -864,7 +864,7 @@ final_msg = best if len(best) <= len(alt) else alt
 
 msg = st.text_area("문자 내용(편집 가능)", value=final_msg, height=140)
 seg, remain, nchar = sms_segments_korean(msg)
-st.caption(f"{nchar}자 · 추정 {seg}건(현재 세그먼트 남은 {remain}자)  *UCS-2 기준 70/67 규칙*")
+st.caption(f"{nchar}자 · 추정 {seg}건(현재 세그먼트 남은 {remain}자)")
 
 with st.expander("추천안 A/B 미리보기", expanded=False):
     st.markdown("**A 후보**")

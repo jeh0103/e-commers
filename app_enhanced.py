@@ -948,11 +948,33 @@ with tabs[1]:
     cid = st.text_input("CustomerID 입력", value="")
     colA, colB = st.columns([1, 1])
     with colA:
-        if st.button("상세 페이지 열기"):
-            if cid:
-                page_href = f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}"
-                st.markdown(f"[👉 고객 상세 페이지로 이동]({page_href})")
-            else:
+        if cid:
+            page_href = f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}"
+
+            # ✅ Streamlit 최신: 버튼 클릭 = 즉시 이동
+            try:
+                st.link_button("상세 페이지 열기", page_href)
+            except Exception:
+                # ✅ 구버전 폴백: 버튼처럼 보이는 링크(1번 클릭으로 이동)
+                st.markdown(
+                    f"""
+                    <a href="{page_href}" target="_self"
+                    style="
+                        display:inline-block;
+                        padding:0.45rem 0.85rem;
+                        border:1px solid rgba(250,250,250,0.25);
+                        border-radius:0.5rem;
+                        text-decoration:none;
+                        color:inherit;
+                    ">
+                    상세 페이지 열기
+                    </a>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            # 기존 동작 유지: ID 없으면 버튼 누를 때 경고
+            if st.button("상세 페이지 열기"):
                 st.warning("CustomerID를 입력하세요.")
 
     with colB:
@@ -964,6 +986,14 @@ with tabs[1]:
                 risk = min(max(risk, 0.0), 1.0)
                 st.write("해당 고객의 상대적 이탈 위험도(상위 % 기준):")
                 st.progress(risk)
-                st.dataframe(rename_for_display(q.head(1)).T, use_container_width=True)
+
+                # ✅ 변경(요청 1): 표의 소수점 반올림해서 없애기
+                _t = rename_for_display(q.head(1)).T.copy()
+                _col = _t.columns[0]
+                _num = pd.to_numeric(_t[_col], errors="coerce")
+                _mask = _num.notna()
+                _t.loc[_mask, _col] = _num.loc[_mask].round(0).astype("Int64")
+
+                st.dataframe(_t, use_container_width=True)
             elif q.empty:
                 st.info("일치하는 고객이 없습니다.")

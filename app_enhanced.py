@@ -944,18 +944,18 @@ with tabs[0]:
 # =========================================
 with tabs[1]:
     st.subheader("고객 ID로 조회")
-    st.caption("특정 고객ID를 직접 입력해 해당 고객의 상세 정보를 확인할 수 있습니다.")
+    st.caption("고객ID를 직접 입력해 해당 고객의 상세 정보를 확인할 수 있습니다.")
     cid = st.text_input("CustomerID 입력", value="")
     colA, colB = st.columns([1, 1])
     with colA:
         if cid:
             page_href = f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}"
 
-            # ✅ Streamlit 최신: 버튼 클릭 = 즉시 이동
+       
             try:
                 st.link_button("상세 페이지 열기", page_href)
             except Exception:
-                # ✅ 구버전 폴백: 버튼처럼 보이는 링크(1번 클릭으로 이동)
+        
                 st.markdown(
                     f"""
                     <a href="{page_href}" target="_self"
@@ -973,7 +973,7 @@ with tabs[1]:
                     unsafe_allow_html=True,
                 )
         else:
-            # 기존 동작 유지: ID 없으면 버튼 누를 때 경고
+
             if st.button("상세 페이지 열기"):
                 st.warning("CustomerID를 입력하세요.")
 
@@ -987,13 +987,40 @@ with tabs[1]:
                 st.write("해당 고객의 상대적 이탈 위험도(상위 % 기준):")
                 st.progress(risk)
 
-                # ✅ 변경(요청 1): 표의 소수점 반올림해서 없애기
-                _t = rename_for_display(q.head(1)).T.copy()
-                _col = _t.columns[0]
-                _num = pd.to_numeric(_t[_col], errors="coerce")
-                _mask = _num.notna()
-                _t.loc[_mask, _col] = _num.loc[_mask].round(0).astype("Int64")
+               
+                snap = q.head(1).copy()
 
-                st.dataframe(_t, use_container_width=True)
+
+                if "GenderLabel" not in snap.columns and "Gender" in snap.columns:
+                    snap["GenderLabel"] = snap["Gender"].map(DEFAULT_CODE_TO_LABEL_KO).fillna("미상")
+
+                if "Gender" in snap.columns and "GenderLabel" in snap.columns:
+                    snap = snap.drop(columns=["Gender"], errors="ignore")
+
+                _extra_kor = {
+                    "IncomeLevel": "소득수준",
+                    "SocialMediaEngagementRate": "SNS참여율",
+                    "SocialMediaEngagement": "SNS참여율",
+                }
+
+                snap_disp = rename_for_display(snap).rename(columns=_extra_kor)
+
+                t = snap_disp.T.reset_index()
+                t.columns = ["항목", "값"]
+
+                
+                _num = pd.to_numeric(t["값"], errors="coerce")
+                _mask = _num.notna()
+                t.loc[_mask, "값"] = _num.loc[_mask].round(0).astype("Int64")
+
+                st.dataframe(
+                    t,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "항목": st.column_config.TextColumn("항목", width="large"), 
+                        "값": st.column_config.Column("값", width="medium"),
+                    },
+                )
             elif q.empty:
                 st.info("일치하는 고객이 없습니다.")

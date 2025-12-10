@@ -1008,6 +1008,35 @@ with tabs[1]:
                 t = snap_disp.T.reset_index()
                 t.columns = ["항목", "값"]
 
+                # ✅ 관리자 관점에서 보기 좋은 항목 순서로 재정렬
+                preferred_order = [
+                    # 1) 기본 정보
+                    "고객ID", "성별", "나이", "소득수준", "리피트/프리미엄",
+
+                    # 2) 구매/가치
+                    "총구매수", "평균주문금액", "고객생애가치",
+                    "구매 빈도(월 평균)", "평균구매간격",
+
+                    # 3) 상담/만족(불만 신호)
+                    "고객센터상담수", "평균만족도", "부정경험지수",
+
+                    # 4) 참여/채널
+                    "이메일참여율", "SNS참여율", "총참여점수", "모바일앱사용",
+
+                    # 5) 모델/위험 관련(있으면 맨 아래로)
+                    "이탈위험점수", "이탈 위험 점수(0~100)", "위험 수준",
+                ]
+
+                order_map = {name: i for i, name in enumerate(preferred_order)}
+                t["_order"] = t["항목"].map(order_map).fillna(9999).astype(int)
+
+                # stable 정렬: 목록에 없는 항목들은 기존 순서 유지한 채 아래로 내려감
+                t = (
+                    t.sort_values("_order", kind="stable")
+                    .drop(columns=["_order"])
+                    .reset_index(drop=True)
+                )
+
                 
                 _num = pd.to_numeric(t["값"], errors="coerce")
                 _mask = _num.notna()

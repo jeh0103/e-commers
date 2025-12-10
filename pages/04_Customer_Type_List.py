@@ -249,7 +249,7 @@ c3.metric("평균 이탈 위험(0~100)", "-" if gdf["이탈 위험 점수(0~100)
 c4.metric("최근 7일 연락 없음", f"{int((~gdf['최근 7일 연락']).sum()):,}명")
 
 # -------------------------------
-# 관리자 관점: 한눈에 보는 특징(전체 대비 차이)
+# 전체 대비 차이
 # -------------------------------
 key_cols = [
     ("PurchaseFrequency", "구매 빈도", "↓ 낮을수록 위험"),
@@ -276,7 +276,7 @@ for col, label, direction in key_cols:
         delta_txt = f"{delta:+.0f}%"
     rows.append((abs(delta), label, b_mean, a_mean, delta_txt, direction))
 
-st.markdown("#### ✅ 이 유형의 눈에 띄는 특징(전체 대비)")
+st.markdown("#### ✅ 유형 특징")
 if rows:
     rows.sort(reverse=True)
     top = rows[:3]
@@ -313,14 +313,13 @@ if only_no_contact:
 if "이탈 위험 점수(0~100)" in view_df.columns:
     view_df = view_df[pd.to_numeric(view_df["이탈 위험 점수(0~100)"], errors="coerce").fillna(0) >= float(min_risk)]
 
-# ✅ 나이: 소수점 제거(반올림) → nullable int
 age_series = pd.to_numeric(view_df.get("Age", np.nan), errors="coerce").round(0)
 try:
     age_series = age_series.astype("Int64")
 except Exception:
     pass
 
-# 표시 컬럼 구성(고객ID 최우선)
+# 표시 컬럼 구성
 out = pd.DataFrame({
     "고객ID": view_df["CustomerID_clean"].astype(str),
     "성별": view_df.get("GenderLabel", "미상"),
@@ -333,13 +332,13 @@ out = pd.DataFrame({
     "고신뢰 이탈": view_df["고신뢰 이탈"].map({True: "예", False: "아니오"}),
 })
 
-# 리피트/프리미엄 보기 좋게
+# 리피트/프리미엄 
 if "리피트/프리미엄" in out.columns:
     out["리피트/프리미엄"] = out["리피트/프리미엄"].map(lambda x: "예" if str(x) == "1" else "아니오")
 
 out["상세"] = out["고객ID"].map(lambda cid: f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}")
 
-# 정렬: 위험 점수 높은 순
+# 위험 점수 높은 순
 if "이탈 위험 점수(0~100)" in out.columns:
     out = out.sort_values("이탈 위험 점수(0~100)", ascending=False, na_position="last")
 

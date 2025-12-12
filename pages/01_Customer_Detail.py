@@ -950,6 +950,16 @@ hist = pd.read_sql_query(
     "SELECT ts, action, owner, status, note FROM actions WHERE customer_id = ? ORDER BY ts DESC",
     conn, params=(customer_id,)
 )
+# ts(UTC ISO 문자열)를 한국시간(UTC+9) 24시간제로 표시
+def _format_ts_kr(x):
+    try:
+        dt = datetime.datetime.fromisoformat(str(x))  # '2025-12-11T06:05:26.227944'
+        dt = dt + datetime.timedelta(hours=9)         # KST(UTC+9)로 변환
+        return dt.strftime("%Y-%m-%d %H:%M:%S")       # 2025-12-11 15:05:26
+    except Exception:
+        return x
+
+hist["ts"] = hist["ts"].apply(_format_ts_kr)
 
 # 히스토리 컬럼 한글 라벨링
 hist_display = hist.rename(columns={

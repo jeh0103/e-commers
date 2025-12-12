@@ -397,19 +397,17 @@ def _priority_tier(idx: float):
     if idx >= 40: return "보통", "rb-amber"
     return "후순위", "rb-gray"
 
-def _mk_priority_html(idx: float, raw: float, thr: float|None):
+def _mk_priority_html(idx: float, raw: float, thr: float | None):
+    """우선 연락도 표시용 HTML – 배지만 표시(점수 텍스트 없음)."""
     label, css = _priority_tier(float(idx))
     tip = f"우선 연락 점수 {int(idx)}/100"
     if pd.notna(raw):
         tip += f" | 모델 원점수 {float(raw):.4f}"
     if thr is not None and np.isfinite(thr):
         tip += f" | 임계 {float(thr):.4f}"
-    return (
-        f"<div class='rwrap' title='{tip}'>"
-        f"  <div class='rbar'><div class='fill {css}' style='width:{int(idx)}%;'></div></div>"
-        f"  <div class='rbadge {css}'>{label}</div>"
-        f"</div>"
-    )
+
+    # ✅ 배지 하나만 렌더링 (최우선/높음/보통/후순위)
+    return f"<span class='rbadge {css}' title='{tip}'>{label}</span>"
 
 top_sub["__priority_html__"] = [
     _mk_priority_html(
@@ -457,20 +455,19 @@ view_df["우선 연락도"] = top_sub["__priority_html__"]
 view_df.drop(columns=["CustomerID_clean","__priority_html__","__priority_idx__"], inplace=True, errors="ignore")
 view_df = rename_for_display(view_df)
 
-# 표 표시 순서: 순위 → 고객ID → 우선 연락도 → 리스크요인 → 프로필/가치/지표
+# 표 표시 순서: 순위 → 고객ID → 우선 연락도 → 리스크요인 → 나머지
 display_cols = ["", "고객ID", "우선 연락도", "리스크요인"] + [
-    c for c in view_df.columns
-    if c not in ("","고객ID","우선 연락도","리스크요인")
+    c for c in view_df.columns if c not in ("","고객ID","우선 연락도","리스크요인")
 ]
 
-# 숫자 포맷: 나이·구매횟수는 정수, CLV는 천단위, 나머지는 소수 2자리
+# 숫자 포맷
 age_label = KOR_COL.get("Age", "Age")
 clv_label = KOR_COL.get("CustomerLifetimeValue", "CustomerLifetimeValue")
-tp_label = KOR_COL.get("TotalPurchases", "TotalPurchases")
+tp_label  = KOR_COL.get("TotalPurchases", "TotalPurchases")
 
 fmt_map = {}
 for c in display_cols:
-    if c in ("", "고객ID", "성별", "우선 연락도", "리스크요인"):
+    if c in ("","고객ID","성별","우선 연락도","리스크요인"):
         continue
     if c in (age_label, tp_label):
         fmt_map[c] = "{:.0f}"
@@ -479,79 +476,89 @@ for c in display_cols:
     else:
         fmt_map[c] = "{:.2f}"
 
-styler = view_df[display_cols].style.format(fmt_map).hide(axis="index")
-styler = styler.set_table_attributes('id="risky_list_table" class="dataframe"')
+styler = (
+    view_df[display_cols]
+    .style
+    .format(fmt_map)
+    .hide(axis="index")
+    .set_table_attributes('class="dataframe"')
+)
 
-# ===== 표/태그/지표 CSS + 가로 스크롤 컨테이너 =====
 table_html = styler.to_html(escape=False)
 
-st.markdown("""
-<style>
-.risky-wrap {
-  overflow-x: auto;
-}
+st.markdown(
+    """
+    <style>
+    /* 가로 스크롤 컨테이너 */
+    .risky-scroll {
+      width: 100%;
+      overflow-x: auto;       /* 🔥 여기서 가로 스크롤 강제 */
+    }
 
-/* 표는 내용 폭에 맞게, 고정폭 제거 */
-#risky_list_table {
-  width: auto !important;
-  table-layout: auto;
-}
+    .risky-scroll table {
+      border-collapse: collapse;
+      width: auto !important;
+      min-width: 1500px;      /* 화면보다 넓게 만들어야 스크롤이 생김. 필요하면 1800 등으로 조정 */
+      max-width: none !important;
+      table-layout: auto;
+    }
 
-#risky_list_table th, #risky_list_table td {
-  padding: 10px 12px !important;
-  line-height: 1.45;
-  vertical-align: middle;
-}
+    .risky-scroll th,
+    .risky-scroll td {
+      padding: 10px 12px !important;
+      line-height: 1.45;
+      vertical-align: middle;
+      white-space: nowrap;    /* 줄바꿈 대신 가로로 쭉 펼침 */
+    }
 
-/* 셀은 줄바꿈 없이 표시 — 가로 스크롤로 확인 */
-#risky_list_table td {
-  white-space: nowrap;
-}
+    /* 리스크 요인 태그 */
+    .tag {
+      display: inline-block;
+      padding: 2px 6px;
+      margin-right: 4px;
+      margin-bottom: 2px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .tag-red   { background: rgba(255, 59, 48, 0.18); border: 1px solid rgba(255, 59, 48, 0.35); }
+    .tag-amber { background: rgba(255,149,  0, 0.18); border: 1px solid rgba(255,149,  0, 0.35); }
+    .tag-gray  { background: rgba(128,128,128,0.18); border: 1px solid rgba(128,128,128,0.35); }
 
-/* 리스크 요인 태그 */
-.tag {
-  display: inline-block;
-  padding: 2px 6px;
-  margin-right: 4px;
-  margin-bottom: 2px;
-  border-radius: 6px;
-  font-size: 12px;
-}
-.tag-red   { background: rgba(255, 59, 48, 0.18); border: 1px solid rgba(255, 59, 48, 0.35); }
-.tag-amber { background: rgba(255,149,  0, 0.18); border: 1px solid rgba(255,149,  0, 0.35); }
-.tag-gray  { background: rgba(128,128,128,0.18); border: 1px solid rgba(128,128,128,0.35); }
+    /* 우선 연락도 막대 + 배지 */
+    .rwrap { display:flex; align-items:center; gap:8px; }
+    .rbar  { flex:1; height:10px; background:rgba(0,0,0,0.06); border-radius:999px; overflow:hidden; }
+    .rbar .fill { height:100%; }
+    .fill.rb-red    { background: rgba(255, 59, 48, 0.60); }
+    .fill.rb-orange { background: rgba(255,149,  0, 0.60); }
+    .fill.rb-amber  { background: rgba(255,204,  0, 0.55); }
+    .fill.rb-gray   { background: rgba(128,128,128,0.45); }
 
-/* 우선 연락도 막대 + 배지 */
-.rwrap { display:flex; align-items:center; gap:8px; }
-.rbar  { flex:1; height:10px; background:rgba(0,0,0,0.06); border-radius:999px; overflow:hidden; }
-.rbar .fill { height:100%; }
-.fill.rb-red    { background: rgba(255, 59, 48, 0.60); }
-.fill.rb-orange { background: rgba(255,149,  0, 0.60); }
-.fill.rb-amber  { background: rgba(255,204,  0, 0.55); }
-.fill.rb-gray   { background: rgba(128,128,128,0.45); }
+    .rbadge {
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1;
+      border:1px solid transparent;
+    }
+    .rbadge.rb-red    { background: rgba(255, 59, 48, 0.18); border-color: rgba(255, 59, 48, 0.35); }
+    .rbadge.rb-orange { background: rgba(255,149,  0, 0.18); border-color: rgba(255,149,  0, 0.35); }
+    .rbadge.rb-amber  { background: rgba(255,204,  0, 0.18); border-color: rgba(255,204,  0, 0.35); }
+    .rbadge.rb-gray   { background: rgba(128,128,128,0.18); border-color: rgba(128,128,128,0.35); }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-.rbadge {
-  padding: 2px 6px;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1;
-  border:1px solid transparent;
-}
-.rbadge.rb-red    { background: rgba(255, 59, 48, 0.18); border-color: rgba(255, 59, 48, 0.35); }
-.rbadge.rb-orange { background: rgba(255,149,  0, 0.18); border-color: rgba(255,149,  0, 0.35); }
-.rbadge.rb-amber  { background: rgba(255,204,  0, 0.18); border-color: rgba(255,204,  0, 0.35); }
-.rbadge.rb-gray   { background: rgba(128,128,128,0.18); border-color: rgba(128,128,128,0.35); }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(
+    f"<div class='risky-scroll'>{table_html}</div>",
+    unsafe_allow_html=True,
+)
 
-st.markdown(f"<div class='risky-wrap'>{table_html}</div>", unsafe_allow_html=True)
-
-# ===== CSV 다운로드 (태그=텍스트, 우선 연락도/원점수 포함)
+# ===== CSV 다운로드 (태그=텍스트, 우선 연락도/원점수 포함) =====
 export_df = view_df.copy()
 export_df.rename(columns={"": "순위"}, inplace=True)
 export_df.insert(1, "CustomerID", export_df["고객ID"].str.extract(r'>(.*?)<')[0])
 
-# 우선 연락도(0-100) & 원점수 열 추가
 export_df.drop(columns=["우선 연락도"], inplace=True)
 export_df.insert(2, "우선연락도(0-100)", top_sub["__priority_idx__"].astype(int).values)
 
@@ -565,7 +572,6 @@ raw_series = (
     if sort_metric in top_sub.columns else pd.Series([np.nan]*len(top_sub))
 )
 export_df.insert(3, raw_label, raw_series.values)
-
 export_df["리스크요인"] = top_sub["__tags_text__"].values
 
 csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")

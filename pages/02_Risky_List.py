@@ -12,21 +12,20 @@ st.set_page_config(page_title="📋 이탈 고객 리스트", layout="wide")
 KOR_COL = {
     "CustomerID_clean": "고객ID",
     "GenderLabel": "성별",
-    "ChurnRiskScore": "이탈위험점수",
-    "PurchaseFrequency": "구매빈도",
-    "CSFrequency": "상담빈도",
-    "AverageSatisfactionScore": "평균만족도",
-    "NegativeExperienceIndex": "부정경험지수",
-    "EmailEngagementRate": "이메일참여율",
-    "TotalEngagementScore": "총참여점수",
+    "Age": "나이",
+    "CustomerLifetimeValue": "고객생애가치(CLV)",
+    "TotalPurchases": "총 구매 횟수",
+    "PurchaseFrequency": "구매 빈도(월 평균)",
+    "CSFrequency": "상담 빈도(월 평균)",
+    "AverageSatisfactionScore": "평균 만족도",
+    "NegativeExperienceIndex": "부정 경험 지수",
+    "EmailEngagementRate": "이메일 참여율",
+    "TotalEngagementScore": "총 활동 점수",
+    "ChurnRiskScore": "이탈 위험 점수",
+    "RepeatAndPremiumFlag": "리피트/프리미엄 여부",
+    # 내부적으로만 사용하는 모델 점수(화면 표에서는 숨김)
     "IF_AnomalyScore": "IF 이상치점수",
     "AE_ReconError": "AE 재구성오차",
-    "AvgPurchaseInterval": "평균구매간격",
-    "TotalPurchases": "총구매수",
-    "AverageOrderValue": "평균주문금액",
-    "CustomerLifetimeValue": "고객생애가치",
-    "Age": "나이",
-    "RepeatAndPremiumFlag": "리피트/프리미엄",
 }
 
 def rename_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -88,7 +87,7 @@ def load_main():
     else:
         df["CustomerID_clean"] = np.nan
 
-    # ✅ 원본에 ID가 없거나(또는 결측) 전부 비면: CUST00001~ 임시 생성
+    
     if df["CustomerID_clean"].isna().all() or df["CustomerID_clean"].isna().any():
         generated = pd.Series(np.arange(1, len(df) + 1), index=df.index).map(lambda i: f"CUST{i:05d}")
         df["CustomerID_clean"] = df["CustomerID_clean"].fillna(generated)
@@ -164,7 +163,7 @@ else:
     thr_value = None
     st.markdown(
         "**판단 기준 안내**\n\n"
-        "- IF & AE **두 모델 모두 이탈**로 판단된 고객을 고신뢰군으로 정의합니다.\n"
+        "- **두 모델 모두 이탈**로 판단된 고객을 고신뢰군으로 정의합니다.\n"
         "- 아래 목록은 고신뢰군 중 **이탈위험점수**가 높은 순으로 정렬합니다."
     )
 
@@ -423,10 +422,21 @@ top_sub["__priority_html__"] = [
 
 # ===== 표 구성 (관리자 친화)
 desired = [
-    "CustomerID_clean","GenderLabel","__priority_idx__","__priority_html__",
-    "ChurnRiskScore","IF_AnomalyScore","AE_ReconError",
-    "PurchaseFrequency","CSFrequency","AverageSatisfactionScore","NegativeExperienceIndex",
-    "EmailEngagementRate","TotalEngagementScore"
+    "CustomerID_clean",
+    "GenderLabel",
+    "Age",
+    "RepeatAndPremiumFlag",
+    "CustomerLifetimeValue",
+    "TotalPurchases",
+    "PurchaseFrequency",
+    "CSFrequency",
+    "AverageSatisfactionScore",
+    "NegativeExperienceIndex",
+    "EmailEngagementRate",
+    "TotalEngagementScore",
+    "ChurnRiskScore",
+    "__priority_idx__",
+    "__priority_html__",
 ]
 cols_to_show = [c for c in desired if c in top_sub.columns]
 view_df = top_sub[cols_to_show].copy()
@@ -444,37 +454,68 @@ view_df["리스크요인"] = top_sub["__tags_html__"]
 view_df["우선 연락도"] = top_sub["__priority_html__"]
 
 # 불필요한 내부 컬럼 제거 및 라벨링
-view_df.drop(columns=["CustomerID_clean","__priority_html__"], inplace=True, errors="ignore")
+view_df.drop(columns=["CustomerID_clean","__priority_html__","__priority_idx__"], inplace=True, errors="ignore")
 view_df = rename_for_display(view_df)
 
-# 표 표시 순서: 순번 → 고객ID → 우선 연락도 → 리스크요인 → (참고) 모델 원점수/지표
+# 표 표시 순서: 순위 → 고객ID → 우선 연락도 → 리스크요인 → 프로필/가치/지표
 display_cols = ["", "고객ID", "우선 연락도", "리스크요인"] + [
     c for c in view_df.columns
-    if c not in ("","고객ID","우선 연락도","리스크요인","__priority_idx__")
+    if c not in ("","고객ID","우선 연락도","리스크요인")
 ]
 
-# 숫자 포맷
-fmt_map = {
-    c: "{:.2f}" for c in display_cols
-    if c not in ("","고객ID","성별","우선 연락도","리스크요인")
-}
+# 숫자 포맷: 나이·구매횟수는 정수, CLV는 천단위, 나머지는 소수 2자리
+age_label = KOR_COL.get("Age", "Age")
+clv_label = KOR_COL.get("CustomerLifetimeValue", "CustomerLifetimeValue")
+tp_label = KOR_COL.get("TotalPurchases", "TotalPurchases")
+
+fmt_map = {}
+for c in display_cols:
+    if c in ("", "고객ID", "성별", "우선 연락도", "리스크요인"):
+        continue
+    if c in (age_label, tp_label):
+        fmt_map[c] = "{:.0f}"
+    elif c == clv_label:
+        fmt_map[c] = "{:,.0f}"
+    else:
+        fmt_map[c] = "{:.2f}"
 
 styler = view_df[display_cols].style.format(fmt_map).hide(axis="index")
 styler = styler.set_table_attributes('id="risky_list_table" class="dataframe"')
 
-# ===== 표/태그/지표 CSS
+# ===== 표/태그/지표 CSS + 가로 스크롤 컨테이너 =====
+table_html = styler.to_html(escape=False)
+
 st.markdown("""
 <style>
-#risky_list_table { width: 100% !important; table-layout: fixed; }
-#risky_list_table th, #risky_list_table td {
-  padding: 10px 12px !important; line-height: 1.45; vertical-align: middle;
+.risky-wrap {
+  overflow-x: auto;
 }
-#risky_list_table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 표는 내용 폭에 맞게, 고정폭 제거 */
+#risky_list_table {
+  width: auto !important;
+  table-layout: auto;
+}
+
+#risky_list_table th, #risky_list_table td {
+  padding: 10px 12px !important;
+  line-height: 1.45;
+  vertical-align: middle;
+}
+
+/* 셀은 줄바꿈 없이 표시 — 가로 스크롤로 확인 */
+#risky_list_table td {
+  white-space: nowrap;
+}
 
 /* 리스크 요인 태그 */
 .tag {
-  display: inline-block; padding: 2px 6px; margin-right: 4px; margin-bottom: 2px;
-  border-radius: 6px; font-size: 12px;
+  display: inline-block;
+  padding: 2px 6px;
+  margin-right: 4px;
+  margin-bottom: 2px;
+  border-radius: 6px;
+  font-size: 12px;
 }
 .tag-red   { background: rgba(255, 59, 48, 0.18); border: 1px solid rgba(255, 59, 48, 0.35); }
 .tag-amber { background: rgba(255,149,  0, 0.18); border: 1px solid rgba(255,149,  0, 0.35); }
@@ -489,7 +530,13 @@ st.markdown("""
 .fill.rb-amber  { background: rgba(255,204,  0, 0.55); }
 .fill.rb-gray   { background: rgba(128,128,128,0.45); }
 
-.rbadge { padding: 2px 6px; border-radius: 6px; font-size: 12px; line-height: 1; border:1px solid transparent; }
+.rbadge {
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1;
+  border:1px solid transparent;
+}
 .rbadge.rb-red    { background: rgba(255, 59, 48, 0.18); border-color: rgba(255, 59, 48, 0.35); }
 .rbadge.rb-orange { background: rgba(255,149,  0, 0.18); border-color: rgba(255,149,  0, 0.35); }
 .rbadge.rb-amber  { background: rgba(255,204,  0, 0.18); border-color: rgba(255,204,  0, 0.35); }
@@ -497,7 +544,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown(styler.to_html(escape=False), unsafe_allow_html=True)
+st.markdown(f"<div class='risky-wrap'>{table_html}</div>", unsafe_allow_html=True)
 
 # ===== CSV 다운로드 (태그=텍스트, 우선 연락도/원점수 포함)
 export_df = view_df.copy()

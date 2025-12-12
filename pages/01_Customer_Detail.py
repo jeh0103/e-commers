@@ -223,6 +223,72 @@ st.title("👤 고객 상세")
 st.caption(f"고객ID: {customer_id}")
 
 # -------------------------------
+# 상태 요약 카드 (캡션 바로 아래)
+# -------------------------------
+# 고객유형(클러스터) 표시
+cluster_raw = None
+if exists("BehaviorClusterName"):
+    cluster_raw = row.get("BehaviorClusterName")
+elif exists("BehaviorCluster"):
+    cluster_raw = row.get("BehaviorCluster")
+
+def _clean_cluster_name(x):
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return "미분류"
+    s = str(x).strip()
+    if ":" in s:
+        left, right = s.split(":", 1)
+        if len(left.strip()) <= 3:
+            return right.strip()
+    return s
+
+customer_type = _clean_cluster_name(cluster_raw)
+
+# 이탈 신호 요약(짧게)
+has_flags = all(exists(c) for c in ["Both_ChurnFlag", "IF_ChurnFlag", "AE_ChurnFlag"])
+both = int(row.get("Both_ChurnFlag", 0)) if has_flags else 0
+if_flag = int(row.get("IF_ChurnFlag", 0)) if has_flags else 0
+ae_flag = int(row.get("AE_ChurnFlag", 0)) if has_flags else 0
+
+if not has_flags:
+    badge, msg, signals = "정보부족", "이탈 신호를 계산할 수 없음", ""
+    bg, border = "rgba(255,255,255,0.04)", "rgba(255,255,255,0.12)"
+elif both == 1:
+    badge, msg, signals = "저활성·불만층(고위험)", "즉시 관리 필요", "이상행동 + 패턴변화"
+    bg, border = "rgba(255, 75, 75, 0.14)", "rgba(255, 75, 75, 0.35)"
+elif if_flag == 1:
+    badge, msg, signals = "주의", "불만/이상행동 신호", "이상행동"
+    bg, border = "rgba(255, 193, 7, 0.14)", "rgba(255, 193, 7, 0.35)"
+elif ae_flag == 1:
+    badge, msg, signals = "관찰", "이용 패턴 감소 신호", "패턴변화"
+    bg, border = "rgba(3, 169, 244, 0.14)", "rgba(3, 169, 244, 0.35)"
+else:
+    badge, msg, signals = "정상", "특이 신호 없음", ""
+    bg, border = "rgba(76, 175, 80, 0.12)", "rgba(76, 175, 80, 0.30)"
+
+signal_line = f"신호: {signals}" if signals else ""
+
+st.markdown(
+    f"""
+    <div style="max-width: 600px; margin-top:8px; margin-bottom:12px;">
+      <div style="padding:14px 14px; border-radius:14px; border:1px solid {border}; background:{bg};">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <div style="font-size:18px; font-weight:800;">🧩 {customer_type}</div>
+          <div style="font-size:12px; padding:4px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.18); background:rgba(0,0,0,0.10);">
+            {badge}
+          </div>
+        </div>
+        <div style="margin-top:8px; font-size:14px; font-weight:700;">{msg}</div>
+        <div style="margin-top:4px; font-size:12px; opacity:0.85;">{signal_line}</div>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown("---")
+
+# -------------------------------
 # Key-Value table helper
 # -------------------------------
 def kv_table(pairs):
@@ -270,70 +336,6 @@ with colR:
     # 컬럼 이름 → 한글 라벨로 변환
     feat_pairs = [(col_label(c), row[c]) for c in feat_cols]
     st.table(kv_table(feat_pairs))
-
-st.markdown("---")
-st.subheader("상태 요약")
-
-# 고객유형(클러스터) 표시
-cluster_raw = None
-if exists("BehaviorClusterName"):
-    cluster_raw = row.get("BehaviorClusterName")
-elif exists("BehaviorCluster"):
-    cluster_raw = row.get("BehaviorCluster")
-
-def _clean_cluster_name(x):
-    if x is None or (isinstance(x, float) and np.isnan(x)):
-        return "미분류"
-    s = str(x).strip()
-    if ":" in s:
-        left, right = s.split(":", 1)
-        if len(left.strip()) <= 3:
-            return right.strip()
-    return s
-
-customer_type = _clean_cluster_name(cluster_raw)
-
-# 이탈 신호 요약(짧게)
-has_flags = all(exists(c) for c in ["Both_ChurnFlag", "IF_ChurnFlag", "AE_ChurnFlag"])
-both = int(row.get("Both_ChurnFlag", 0)) if has_flags else 0
-if_flag = int(row.get("IF_ChurnFlag", 0)) if has_flags else 0
-ae_flag = int(row.get("AE_ChurnFlag", 0)) if has_flags else 0
-
-if not has_flags:
-    badge, msg, signals = "정보부족", "이탈 신호를 계산할 수 없음", ""
-    bg, border = "rgba(255,255,255,0.04)", "rgba(255,255,255,0.12)"
-elif both == 1:
-    badge, msg, signals = "고신뢰 이탈", "즉시 관리 필요", "이상행동 + 패턴변화"
-    bg, border = "rgba(255, 75, 75, 0.14)", "rgba(255, 75, 75, 0.35)"
-elif if_flag == 1:
-    badge, msg, signals = "주의", "불만/이상행동 신호", "이상행동"
-    bg, border = "rgba(255, 193, 7, 0.14)", "rgba(255, 193, 7, 0.35)"
-elif ae_flag == 1:
-    badge, msg, signals = "관찰", "이용 패턴 감소 신호", "패턴변화"
-    bg, border = "rgba(3, 169, 244, 0.14)", "rgba(3, 169, 244, 0.35)"
-else:
-    badge, msg, signals = "정상", "특이 신호 없음", ""
-    bg, border = "rgba(76, 175, 80, 0.12)", "rgba(76, 175, 80, 0.30)"
-
-signal_line = f"신호: {signals}" if signals else ""
-
-st.markdown(
-    f"""
-    <div style="max-width: 600px; margin-top:4px; margin-bottom:4px;">
-      <div style="padding:14px 14px; border-radius:14px; border:1px solid {border}; background:{bg};">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-          <div style="font-size:18px; font-weight:800;">🧩 {customer_type}</div>
-          <div style="font-size:12px; padding:4px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.18); background:rgba(0,0,0,0.10);">
-            {badge}
-          </div>
-        </div>
-        <div style="margin-top:8px; font-size:14px; font-weight:700;">{msg}</div>
-        <div style="margin-top:4px; font-size:12px; opacity:0.85;">{signal_line}</div>
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
 
 # -------------------------------
 # 활동/만족 지표 - 전체 대비 분위 & 리스크 시각화

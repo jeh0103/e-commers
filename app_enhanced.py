@@ -709,7 +709,7 @@ with tabs[0]:
         tbl_nonce = st.session_state.get("_customer_type_tbl_nonce", 0)
         _table_key = f"customer_type_table_{tbl_nonce}"
 
-        # ✅ 변경: 체크박스(행 선택) 대신 셀 선택(single-cell)로 이동
+        # ✅ 체크박스 대신 셀(single-cell) 클릭으로 이동
         event = None
         try:
             event = st.dataframe(
@@ -726,7 +726,7 @@ with tabs[0]:
                 },
             )
         except Exception:
-            # 셀 선택 미지원 환경이면(구버전) 표만 보여주고 체크박스는 없게 유지
+            # 셀 선택 미지원 환경이면 표만 보여줌
             st.dataframe(
                 dist,
                 use_container_width=True,
@@ -739,7 +739,7 @@ with tabs[0]:
             )
             event = None
 
-        # 선택된 셀 → 해당 행의 고객유형 페이지로 이동
+        # 선택된 셀 → 해당 고객유형 목록 페이지로 이동
         sel_cells = []
         try:
             sel_cells = list(event.selection.cells) if event is not None else []
@@ -747,8 +747,13 @@ with tabs[0]:
             sel_cells = []
 
         if sel_cells:
-            ridx = int(sel_cells[0][0])  # (row_position, column_name)
-            sel_type = str(dist.iloc[ridx]["고객유형"]).strip()
+            # (row_position, column) 형태
+            cell = sel_cells[0]
+            if isinstance(cell, dict):
+                row_idx = cell.get("row") if cell.get("row") is not None else cell.get("rowIndex")
+            else:
+                row_idx = cell[0]
+            sel_type = str(dist.iloc[int(row_idx)]["고객유형"]).strip()
 
             st.session_state["selected_customer_type"] = sel_type
             st.session_state["_customer_type_tbl_nonce"] = tbl_nonce + 1
@@ -761,7 +766,7 @@ with tabs[0]:
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     # 전체 이탈 위험 현황 요약
     st.subheader("📊 전체 이탈 위험 현황 요약")
-    st.caption("이탈 위험 고객 수를 유형별로 나눈 요약입니다.")
+    st.caption("모델이 포착한 이탈 위험 고객 수를 유형별로 나눈 요약입니다.")
 
     col1, col2, col3, col4 = st.columns(4)
     total_customers = len(filtered)
@@ -944,112 +949,139 @@ with tabs[0]:
 # =========================================
 with tabs[1]:
     st.subheader("고객 ID로 조회")
-    st.caption("고객ID를 직접 입력해 해당 고객의 상세 정보를 확인할 수 있습니다.")
+    st.caption("특정 고객ID를 직접 입력해 해당 고객의 상세 정보를 확인할 수 있습니다.")
     cid = st.text_input("CustomerID 입력", value="")
     colA, colB = st.columns([1, 1])
-    with colA:
-        if cid:
-            page_href = f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}"
 
-       
-            try:
-                st.link_button("상세 페이지 열기", page_href)
-            except Exception:
-        
+    # -----------------------
+    # 왼쪽: 버튼 → 상세 페이지로 바로 이동 (쿼리파라미터 포함)
+    # -----------------------
+    with colA:
+        if st.button("상세 페이지 열기"):
+            if cid:
+                page_href = f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}"
+                # 메타 리다이렉트로 바로 상세 페이지로 이동
                 st.markdown(
-                    f"""
-                    <a href="{page_href}" target="_self"
-                    style="
-                        display:inline-block;
-                        padding:0.45rem 0.85rem;
-                        border:1px solid rgba(250,250,250,0.25);
-                        border-radius:0.5rem;
-                        text-decoration:none;
-                        color:inherit;
-                    ">
-                    상세 페이지 열기
-                    </a>
-                    """,
+                    f"<meta http-equiv='refresh' content='0; url={page_href}'>",
                     unsafe_allow_html=True,
                 )
-        else:
-
-            if st.button("상세 페이지 열기"):
+            else:
                 st.warning("CustomerID를 입력하세요.")
 
+    # -----------------------
+    # 오른쪽: 상태 요약 + 요약 테이블
+    # -----------------------
     with colB:
         if cid:
             q = df[df.get("CustomerID_clean") == str(cid)]
-            if not q.empty and "ChurnRiskScore" in df.columns:
-                p99 = get_p99(df["ChurnRiskScore"])
-                risk = float(q.iloc[0]["ChurnRiskScore"]) / p99
-                risk = min(max(risk, 0.0), 1.0)
-                st.write("해당 고객의 상대적 이탈 위험도(상위 % 기준):")
-                st.progress(risk)
+            if q.empty:
+                st.info("일치하는 고객이 없습니다.")
+            else:
+                row = q.iloc[0]
 
-               
-                snap = q.head(1).copy()
+                # ==== 상태 요약 카드 ====
+                st.markdown("**상태 요약**")
 
+                # 고객유형(클러스터)
+                cluster_raw = None
+                if "BehaviorClusterName" in df.columns:
+                    cluster_raw = row.get("BehaviorClusterName")
+                elif "BehaviorCluster" in df.columns:
+                    cluster_raw = row.get("BehaviorCluster")
 
-                if "GenderLabel" not in snap.columns and "Gender" in snap.columns:
-                    snap["GenderLabel"] = snap["Gender"].map(DEFAULT_CODE_TO_LABEL_KO).fillna("미상")
+                def _clean_cluster_name(x):
+                    if x is None or (isinstance(x, float) and np.isnan(x)):
+                        return "미분류"
+                    s = str(x).strip()
+                    if ":" in s:
+                        left, right = s.split(":", 1)
+                        if len(left.strip()) <= 3:
+                            return right.strip()
+                    return s
 
-                if "Gender" in snap.columns and "GenderLabel" in snap.columns:
-                    snap = snap.drop(columns=["Gender"], errors="ignore")
+                customer_type = _clean_cluster_name(cluster_raw)
 
-                _extra_kor = {
-                    "IncomeLevel": "소득수준",
-                    "SocialMediaEngagementRate": "SNS참여율",
-                    "SocialMediaEngagement": "SNS참여율",
-                }
+                # 이탈 신호 플래그
+                has_flags = all(c in df.columns for c in ["Both_ChurnFlag", "IF_ChurnFlag", "AE_ChurnFlag"])
+                both = int(row.get("Both_ChurnFlag", 0)) if has_flags else 0
+                if_flag = int(row.get("IF_ChurnFlag", 0)) if has_flags else 0
+                ae_flag = int(row.get("AE_ChurnFlag", 0)) if has_flags else 0
 
-                snap_disp = rename_for_display(snap).rename(columns=_extra_kor)
+                if not has_flags:
+                    badge, msg, signals = "정보부족", "이탈 신호를 계산할 수 없음", ""
+                    bg, border = "rgba(255,255,255,0.04)", "rgba(255,255,255,0.12)"
+                elif both == 1:
+                    badge, msg, signals = "고신뢰 이탈", "즉시 관리 필요", "이상행동 + 패턴변화"
+                    bg, border = "rgba(255, 75, 75, 0.14)", "rgba(255, 75, 75, 0.35)"
+                elif if_flag == 1:
+                    badge, msg, signals = "주의", "불만/이상행동 신호", "이상행동"
+                    bg, border = "rgba(255, 193, 7, 0.14)", "rgba(255, 193, 7, 0.35)"
+                elif ae_flag == 1:
+                    badge, msg, signals = "관찰", "이용 패턴 감소 신호", "패턴변화"
+                    bg, border = "rgba(3, 169, 244, 0.14)", "rgba(3, 169, 244, 0.35)"
+                else:
+                    badge, msg, signals = "정상", "특이 신호 없음", ""
+                    bg, border = "rgba(76, 175, 80, 0.12)", "rgba(76, 175, 80, 0.30)"
 
-                t = snap_disp.T.reset_index()
-                t.columns = ["항목", "값"]
+                signal_line = f"신호: {signals}" if signals else ""
 
-                # ✅ 관리자 관점에서 보기 좋은 항목 순서로 재정렬
-                preferred_order = [
-                    # 1) 기본 정보
-                    "고객ID", "성별", "나이", "소득수준", "리피트/프리미엄",
+                st.markdown(
+                    f"""
+                    <div style="max-width: 520px; margin-top:4px; margin-bottom:10px;">
+                      <div style="padding:14px 14px; border-radius:14px; border:1px solid {border}; background:{bg};">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                          <div style="font-size:18px; font-weight:800;">🧩 {customer_type}</div>
+                          <div style="font-size:12px; padding:4px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.18); background:rgba(0,0,0,0.10);">
+                            {badge}
+                          </div>
+                        </div>
+                        <div style="margin-top:8px; font-size:14px; font-weight:700;">{msg}</div>
+                        <div style="margin-top:4px; font-size:12px; opacity:0.85;">{signal_line}</div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-                    # 2) 구매/가치
-                    "총구매수", "평균주문금액", "고객생애가치",
-                    "구매 빈도(월 평균)", "평균구매간격",
-
-                    # 3) 상담/만족(불만 신호)
-                    "고객센터상담수", "평균만족도", "부정경험지수",
-
-                    # 4) 참여/채널
-                    "이메일참여율", "SNS참여율", "총참여점수", "모바일앱사용",
-
-                    # 5) 모델/위험 관련(있으면 맨 아래로)
-                    "이탈위험점수", "이탈 위험 점수(0~100)", "위험 수준",
+                # ==== 기본 특성 요약 테이블 ====
+                # 표시 순서 (관리자 관점에서 의미 있는 순서)
+                fields_order = [
+                    "CustomerID_clean",
+                    "GenderLabel",
+                    "Age",
+                    "IncomeLevel",
+                    "RepeatAndPremiumFlag",
+                    "TotalPurchases",
+                    "AverageOrderValue",
+                    "CustomerLifetimeValue",
+                    "PurchaseFrequency",
+                    "AvgPurchaseInterval",
+                    "CSFrequency",
+                    "AverageSatisfactionScore",
+                    "NegativeExperienceIndex",
+                    "EmailEngagementRate",
+                    "TotalEngagementScore",
+                    "RecencyProxy",
                 ]
 
-                order_map = {name: i for i, name in enumerate(preferred_order)}
-                t["_order"] = t["항목"].map(order_map).fillna(9999).astype(int)
+                pairs = []
+                for c in fields_order:
+                    if c in q.columns:
+                        label = KOR_COL.get(c, c)
+                        val = row[c]
+                        if pd.isna(val):
+                            continue
+                        if isinstance(val, (int, np.integer)):
+                            disp = int(val)
+                        elif isinstance(val, (float, np.floating)):
+                            # 소수점 반올림해서 정수로 표시
+                            disp = int(round(float(val)))
+                        else:
+                            disp = val
+                        pairs.append((label, disp))
 
-                # stable 정렬: 목록에 없는 항목들은 기존 순서 유지한 채 아래로 내려감
-                t = (
-                    t.sort_values("_order", kind="stable")
-                    .drop(columns=["_order"])
-                    .reset_index(drop=True)
-                )
-
-                
-                _num = pd.to_numeric(t["값"], errors="coerce")
-                _mask = _num.notna()
-                t.loc[_mask, "값"] = _num.loc[_mask].round(0).astype("Int64")
-
-                st.dataframe(
-                    t,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "항목": st.column_config.TextColumn("항목", width="large"), 
-                        "값": st.column_config.Column("값", width="medium"),
-                    },
-                )
-            elif q.empty:
-                st.info("일치하는 고객이 없습니다.")
+                if pairs:
+                    kv_df = pd.DataFrame(pairs, columns=["항목", "값"])
+                    st.table(kv_df)
+                else:
+                    st.info("표시할 정보가 없습니다.")

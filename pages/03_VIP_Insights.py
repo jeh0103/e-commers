@@ -5,8 +5,6 @@ import pandas as pd
 import numpy as np
 import os, json
 from urllib.parse import quote
-
-# 외부 유틸: 프로젝트 루트의 utils_vip.py
 from utils_vip import (
     compute_vip_propensity_score,
     select_vip_candidates,
@@ -14,14 +12,8 @@ from utils_vip import (
     roi_for_k,
 )
 
-# ---------------------------------------------------------------------
-# Page Config
-# ---------------------------------------------------------------------
 st.set_page_config(page_title="⭐ VIP 인사이트", layout="wide")
 
-# ---------------------------------------------------------------------
-# 표시 라벨(표시 전용)
-# ---------------------------------------------------------------------
 KOR_COL = {
     "CustomerID_clean": "고객ID",
     "GenderLabel": "성별",
@@ -47,7 +39,6 @@ def dlabel(c): return KOR_COL.get(c, c)
 def rename_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={c: dlabel(c) for c in df.columns})
 
-# === 안전한 컬럼 선택 헬퍼(표 머리 한글화 이후 쓰기) ===
 def to_display_cols(cols: list[str]) -> list[str]:
     return [KOR_COL.get(c, c) for c in cols]
 
@@ -55,9 +46,6 @@ def safe_cols(df: pd.DataFrame, cols: list[str]) -> list[str]:
     disp = to_display_cols(cols)
     return [c for c in disp if c in df.columns]
 
-# ---------------------------------------------------------------------
-# 성별 라벨 보장(대시보드와 동일)
-# ---------------------------------------------------------------------
 DEFAULT_CODE_TO_LABEL_KO = {1:"여성",3:"남성",5:"응답거부",4:"기타/미상",2:"남성",0:"여성"}
 def _normalize_gender_text_to_label_ko(x)->str:
     if x is None or (isinstance(x, float) and np.isnan(x)): return "미상"
@@ -95,14 +83,12 @@ def ensure_gender_label(df_hybrid: pd.DataFrame,
     df["GenderLabel"] = df["GenderLabel"].fillna("미상")
     return df
 
-# ---------------------------------------------------------------------
-# 데이터 로딩
-# ---------------------------------------------------------------------
+
 @st.cache_data(show_spinner=False)
 def load_data():
     base = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
 
-    # ✅ CustomerID / CustomerID_clean 보장 (원본 CSV에 ID가 없거나 비어있는 경우 대비)
+   
     if "CustomerID" not in base.columns:
         base["CustomerID"] = [f"CUST{(i+1):05d}" for i in range(len(base))]
 
@@ -113,7 +99,7 @@ def load_data():
 
     base["CustomerID_clean"] = base["CustomerID"].map(_clean_id)
 
-    # 일부 행만 ID가 비어있는 경우도 처리
+
     if base["CustomerID_clean"].isna().any():
         auto_ids = pd.Series([f"CUST{(i+1):05d}" for i in range(len(base))], index=base.index)
         m = base["CustomerID_clean"].isna()
@@ -122,7 +108,6 @@ def load_data():
 
     base = ensure_gender_label(base)
 
-    # 추가 피처 조인(있을 때만)
     if os.path.exists("ecommerce_customer_data_featured.csv"):
         feat = pd.read_csv("ecommerce_customer_data_featured.csv")
         if "CustomerID" in feat.columns:
@@ -141,7 +126,7 @@ def load_data():
 df = load_data()
 
 # ---------------------------------------------------------------------
-# 전역 필터(대시보드 공유) 적용
+# 전역 필터
 # ---------------------------------------------------------------------
 sel_age = st.session_state.get("sel_age")
 sel_gender_labels = st.session_state.get("sel_gender_labels", [])
@@ -166,9 +151,6 @@ except Exception:
 st.title("⭐ VIP 인사이트")
 st.caption("VIP 정의와 전환 후보 선정을 한 화면에서 확인하고, 후보 리스트와 예상 ROI를 함께 확인합니다.")
 
-# ---------------------------------------------------------------------
-# 유틸(표 스타일/라벨)
-# ---------------------------------------------------------------------
 def qv(s: pd.Series, q: int|float) -> float|None:
     s = pd.to_numeric(s, errors="coerce").dropna()
     return float(s.quantile(q/100.0)) if len(s)>0 else None
@@ -217,9 +199,7 @@ def recommend_tags(row, ref_df):
         add("기본: VIP 전용 상담·무료반품·생일쿠폰")
     return " / ".join(tags)
 
-# ---------------------------------------------------------------------
-# 설정 영역(접기/펼치기) — 화면 구성 유지
-# ---------------------------------------------------------------------
+
 with st.expander("VIP 정의", expanded=False):
     colA, colB, colC = st.columns([1,1,1])
     with colA:
@@ -245,9 +225,7 @@ with st.expander("후보 선정 방식", expanded=False):
     with col6:
         include_nan_id_in_stats = st.checkbox("NaN ID도 통계에 포함(목록/CSV 제외)", value=False)
 
-# ---------------------------------------------------------------------
-# VIP 정의 계산(현재 VIP)
-# ---------------------------------------------------------------------
+
 clv_cut = qv(filtered["CustomerLifetimeValue"], clv_q) if "CustomerLifetimeValue" in filtered.columns else None
 pf_cut  = qv(filtered["PurchaseFrequency"], pf_q) if "PurchaseFrequency" in filtered.columns else None
 mask_clv = filtered["CustomerLifetimeValue"] >= (clv_cut if clv_cut is not None else -np.inf) if "CustomerLifetimeValue" in filtered.columns else False
@@ -260,14 +238,12 @@ vip_linkable = 0
 if "CustomerID_clean" in vip_df_all.columns:
     vip_linkable = int(vip_df_all["CustomerID_clean"].notna().sum())
 
-# 운영 원칙: 현재 VIP 표/CSV는 ID가 있는 고객만 표시(링크/CSV 무의미한 행 제거)
+
 vip_df = vip_df_all.copy()
 if "CustomerID_clean" in vip_df.columns:
     vip_df = vip_df[vip_df["CustomerID_clean"].notna()]
 
-# ---------------------------------------------------------------------
-# 후보 스코어링 + 선정 (utils_vip 사용)
-# ---------------------------------------------------------------------
+
 scored = compute_vip_propensity_score(filtered, ref_df=filtered)
 scored_full = filtered.reset_index(drop=True).merge(
     scored.reset_index(drop=True), left_index=True, right_index=True, how="left"
@@ -281,9 +257,7 @@ cands, snap = select_vip_candidates(
     include_nan_id_in_stats=bool(include_nan_id_in_stats),
 )
 
-# ---------------------------------------------------------------------
-# 탭 구성 — 화면 구성 유지
-# ---------------------------------------------------------------------
+
 tabs = st.tabs(["📌 개요", "🚀 전환 후보", "👑 현재 VIP", "ℹ️ 사용 설명"])
 
 # == 개요 탭 ==
@@ -337,9 +311,7 @@ with tabs[0]:
         cB.metric("추정 비용(원)", f"{cost:,.0f}")
         cC.metric("ROI(%)", f"{roi_val:,.1f}")
 
-# ================================
-# == 전환 후보 탭 (교체된 블록) ==
-# ================================
+
 with tabs[1]:
     st.subheader("🚀 전환 후보 리스트")
     if len(cands) == 0:
@@ -348,7 +320,6 @@ with tabs[1]:
         table_css()
         view = cands.copy()
 
-        # (안전) ID 보강 + 표/CSV에서는 ID 없는 행 제외
         if "CustomerID_clean" not in view.columns and "CustomerID" in view.columns:
             tmp = view["CustomerID"].astype(str).str.strip()
             tmp = tmp.mask(tmp.str.lower().isin(["", "nan", "none", "null"]))
@@ -356,14 +327,12 @@ with tabs[1]:
         if "CustomerID_clean" in view.columns:
             view = view[view["CustomerID_clean"].notna()].copy()
 
-        # 고객ID 링크
         if "CustomerID_clean" in view.columns:
             view["고객ID"] = view["CustomerID_clean"].apply(
                 lambda cid: f"<a href='/Customer_Detail?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
             )
             view.drop(columns=["CustomerID_clean"], inplace=True, errors="ignore")
 
-        # 신뢰도 배지 + 추천 혜택
         cov = pd.to_numeric(view.get("coverage", 0.0), errors="coerce").fillna(0.0)
         def _badge(v):
             v = float(v)
@@ -373,7 +342,6 @@ with tabs[1]:
         view["신뢰도"] = cov.apply(_badge)
         view["추천전략"] = [recommend_tags(row, filtered) for _, row in view.iterrows()]
 
-        # VIP 게이지(막대)
         def bar_html(x):
             try:
                 pct = int(np.clip(float(x), 0, 100))
@@ -383,7 +351,6 @@ with tabs[1]:
         if "VIP잠재지수" in view.columns:
             view["VIP게이지"] = view["VIP잠재지수"].apply(bar_html)
 
-        # 한글 라벨로 변환 후 안전하게 컬럼 선택
         view = rename_for_display(view)
         metric_cols = [
             "PurchaseFrequency", "AverageOrderValue", "TotalEngagementScore",
@@ -397,7 +364,6 @@ with tabs[1]:
         ]
         display_cols = safe_cols(view, base_cols)
 
-        # 포맷(한글 컬럼명 기준)
         fmt = {
             dlabel("AverageOrderValue"): "{:,.0f}",
             dlabel("PurchaseFrequency"): "{:.2f}",
@@ -411,14 +377,12 @@ with tabs[1]:
         styler = view[display_cols].style.hide(axis="index").format(fmt)
         st.markdown(styler.set_table_attributes('id="pot_table"').to_html(escape=False), unsafe_allow_html=True)
 
-        # 후보 표 전용 CSS(고객ID 열 너비 확보)
         st.markdown("""
         <style>
         #pot_table th:nth-child(1), #pot_table td:nth-child(1) { min-width: 120px; }
         </style>
         """, unsafe_allow_html=True)
 
-        # CSV (고객ID 텍스트 포함, 게이지 제외)
         exp = view[display_cols].copy()
         if "고객ID" in exp.columns and "CustomerID" not in exp.columns:
             exp.insert(0, "CustomerID", exp["고객ID"].str.extract(r'>(.*?)<')[0])
@@ -428,9 +392,6 @@ with tabs[1]:
         st.download_button("⬇️ 전환 후보 CSV", exp.to_csv(index=False).encode("utf-8-sig"),
                            "vip_candidates.csv", "text/csv")
 
-# =============================
-# == 현재 VIP 탭 (교체된 블록) ==
-# =============================
 with tabs[2]:
     st.subheader("👑 현재 VIP 고객")
     if len(vip_df) == 0:
@@ -439,7 +400,6 @@ with tabs[2]:
         table_css()
         view = vip_df.copy()
 
-        # (안전) ID 보강 + 표/CSV에서는 ID 없는 행 제외
         if "CustomerID_clean" not in view.columns and "CustomerID" in view.columns:
             tmp = view["CustomerID"].astype(str).str.strip()
             tmp = tmp.mask(tmp.str.lower().isin(["", "nan", "none", "null"]))
@@ -447,17 +407,14 @@ with tabs[2]:
         if "CustomerID_clean" in view.columns:
             view = view[view["CustomerID_clean"].notna()].copy()
 
-        # 고객ID 링크
         if "CustomerID_clean" in view.columns:
             view["고객ID"] = view["CustomerID_clean"].apply(
                 lambda cid: f"<a href='/Customer_Detail?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
             )
             view.drop(columns=["CustomerID_clean"], inplace=True, errors="ignore")
 
-        # 추천 혜택
         view["추천혜택"] = [recommend_tags(row, filtered) for _, row in view.iterrows()]
 
-        # 한글 라벨 후 안전 선택
         view = rename_for_display(view)
         base_cols = [
             "고객ID",
@@ -479,14 +436,12 @@ with tabs[2]:
         styler = view[display_cols].style.hide(axis="index").format(fmt)
         st.markdown(styler.set_table_attributes('id="vip_table"').to_html(escape=False), unsafe_allow_html=True)
 
-        # 현재 VIP 표 전용 CSS(고객ID 열 너비 확보)
         st.markdown("""
         <style>
         #vip_table th:nth-child(1), #vip_table td:nth-child(1) { min-width: 120px; }
         </style>
         """, unsafe_allow_html=True)
 
-        # CSV
         exp = view[display_cols].copy()
         if "고객ID" in exp.columns and "CustomerID" not in exp.columns:
             exp.insert(0, "CustomerID", exp["고객ID"].str.extract(r'>(.*?)<')[0])
@@ -494,7 +449,6 @@ with tabs[2]:
         st.download_button("⬇️ VIP 리스트 CSV", exp.to_csv(index=False).encode("utf-8-sig"),
                            "vip_list.csv", "text/csv")
 
-# == 사용 설명 탭 ==
 with tabs[3]:
     st.subheader("ℹ️ 사용 설명")
     st.markdown("""
@@ -511,7 +465,6 @@ with tabs[3]:
 - **KPI(추정치)**: 예상 전환 성공률, 선별 효율(전체 대비), 예상 ROI를 참고 지표로 제시합니다.
 """)
 
-    # ── 전략 시뮬레이터 안내(도움말 탭에 포함)
     with st.expander("🧮 전환 전략 시뮬레이터 안내", expanded=False):
         st.markdown("""
 **무엇을 계산하나요?**  

@@ -160,7 +160,7 @@ def load_main():
     except Exception:
         return None
 
-    # CustomerID_clean 보장: CustomerID가 없으면 CUST00001~ 자동 생성
+   
     if "CustomerID" in df.columns:
         def _clean(x):
             if pd.isna(x):
@@ -171,7 +171,7 @@ def load_main():
     else:
         df["CustomerID_clean"] = pd.Series(np.arange(1, len(df) + 1)).map(lambda i: f"CUST{i:05d}")
 
-    # 혹시라도 결측이 남아있으면 행 순서 기반 ID로 보완
+   
     if "CustomerID_clean" in df.columns:
         mask_bad = df["CustomerID_clean"].isna() | df["CustomerID_clean"].astype(str).str.strip().eq("")
         if mask_bad.any():
@@ -223,9 +223,9 @@ st.title("👤 고객 상세")
 st.caption(f"고객ID: {customer_id}")
 
 # -------------------------------
-# 상태 요약 카드 (캡션 바로 아래)
+# 상태 요약 카드
 # -------------------------------
-# 고객유형(클러스터) 표시
+# 고객유형 표시
 cluster_raw = None
 if exists("BehaviorClusterName"):
     cluster_raw = row.get("BehaviorClusterName")
@@ -244,7 +244,7 @@ def _clean_cluster_name(x):
 
 customer_type = _clean_cluster_name(cluster_raw)
 
-# 이탈 신호 요약(짧게)
+# 이탈 신호 요약
 has_flags = all(exists(c) for c in ["Both_ChurnFlag", "IF_ChurnFlag", "AE_ChurnFlag"])
 both = int(row.get("Both_ChurnFlag", 0)) if has_flags else 0
 if_flag = int(row.get("IF_ChurnFlag", 0)) if has_flags else 0
@@ -424,7 +424,7 @@ if driver_cols and exists("Both_ChurnFlag"):
     mu = healthy.mean(numeric_only=True)
     sigma = healthy.std(numeric_only=True).replace(0, 1e-6)
     z = ((row[driver_cols] - mu) / sigma).astype(float)
-    # 크기 기준으로 정렬 (절대값 큰 순)
+ 
     drivers = z.sort_values(key=lambda s: s.abs(), ascending=False)
 
     NAME = {
@@ -437,7 +437,6 @@ if driver_cols and exists("Both_ChurnFlag"):
         "TotalEngagementScore":     "총 참여 점수",
     }
 
-    # 위험 방향 정의(위에 있는 RISK_DIR와 동일한 의미)
     DIR = {
         "CSFrequency":            "higher_worse",
         "RecencyProxy":           "higher_worse",
@@ -450,11 +449,11 @@ if driver_cols and exists("Both_ChurnFlag"):
 
     def is_bad(feat: str, zval: float) -> bool:
         d = DIR.get(feat, "neutral")
-        if d == "higher_worse":   # 값이 높을수록 위험
+        if d == "higher_worse":   
             return zval > 0.8
-        if d == "lower_worse":    # 값이 낮을수록 위험
+        if d == "lower_worse":    
             return zval < -0.8
-        return abs(zval) >= 1.5   # 방향 없는 경우
+        return abs(zval) >= 1.5   
 
     def severity_badge_and_text(zval: float):
         sev = abs(float(zval))
@@ -470,9 +469,8 @@ if driver_cols and exists("Both_ChurnFlag"):
     def describe_problem_action(feat: str, zval: float):
         """비개발자용 문제 요약 + 권장 액션."""
         d = DIR.get(feat, "neutral")
-        up = zval > 0  # 평균보다 높은지/낮은지
+        up = zval > 0  
 
-        # 기본값 (혹시 누락될 경우)
         problem = "정상 고객과 다른 패턴을 보입니다."
         action  = "상세 이력을 보고 원인을 파악한 뒤 맞춤 케어를 진행합니다."
 
@@ -537,7 +535,7 @@ if driver_cols and exists("Both_ChurnFlag"):
     # 1) 상단 카드: 위험 방향으로 많이 벗어난 요인 Top3
     driver_items = list(drivers.items())
     bad_items = [(f, float(zv)) for f, zv in driver_items if is_bad(f, float(zv))]
-    if not bad_items:   # 모두 애매하면 그냥 상위 3개 사용
+    if not bad_items:   
         bad_items = [(f, float(zv)) for f, zv in driver_items]
     top3 = bad_items[:3]
 
@@ -559,7 +557,7 @@ if driver_cols and exists("Both_ChurnFlag"):
                 f"- **권장 액션**: {action}"
             )
 
-    # 2) 상세 테이블(Top 5) – 숫자 z점수 대신 텍스트로 영향 정도만 표시
+    # 2) 상세 테이블(Top 5)
     rows_drv = []
     for feat, zval in list(drivers.items())[:5]:
         zval = float(zval)
@@ -607,7 +605,6 @@ else:
 st.markdown("---")
 st.subheader("📨 맞춤 문자 생성/발송")
 
-# ----- 이하 SMS 부분은 동일 -----
 import math
 
 def sms_segments_korean(text: str):
@@ -950,7 +947,7 @@ hist = pd.read_sql_query(
     "SELECT ts, action, owner, status, note FROM actions WHERE customer_id = ? ORDER BY ts DESC",
     conn, params=(customer_id,)
 )
-# ts(UTC ISO 문자열)를 한국시간(UTC+9) 24시간제로 표시
+
 def _format_ts_kr(x):
     try:
         dt = datetime.datetime.fromisoformat(str(x))  
@@ -961,7 +958,6 @@ def _format_ts_kr(x):
 
 hist["ts"] = hist["ts"].apply(_format_ts_kr)
 
-# 히스토리 컬럼 한글 라벨링
 hist_display = hist.rename(columns={
     "ts": "기록일시",
     "action": "액션",
@@ -971,7 +967,6 @@ hist_display = hist.rename(columns={
 })
 st.dataframe(hist_display, use_container_width=True)
 
-# 하단 네비
 st.markdown("---")
 try:
     st.page_link("app_enhanced.py", label="← 대시보드로 돌아가기", icon="🏠")

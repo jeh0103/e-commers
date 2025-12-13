@@ -953,14 +953,10 @@ with tabs[1]:
     cid = st.text_input("CustomerID 입력", value="")
     colA, colB = st.columns([1, 1])
 
-    # -----------------------
-    # 왼쪽: 버튼 → 상세 페이지로 바로 이동 (쿼리파라미터 포함)
-    # -----------------------
     with colA:
         if st.button("상세 페이지 열기"):
             if cid:
                 page_href = f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}"
-                # 메타 리다이렉트로 바로 상세 페이지로 이동
                 st.markdown(
                     f"<meta http-equiv='refresh' content='0; url={page_href}'>",
                     unsafe_allow_html=True,
@@ -968,9 +964,6 @@ with tabs[1]:
             else:
                 st.warning("CustomerID를 입력하세요.")
 
-    # -----------------------
-    # 오른쪽: 상태 요약 + 요약 테이블
-    # -----------------------
     with colB:
         if cid:
             q = df[df.get("CustomerID_clean") == str(cid)]
@@ -979,10 +972,8 @@ with tabs[1]:
             else:
                 row = q.iloc[0]
 
-                # ==== 상태 요약 카드 ====
                 st.markdown("**상태 요약**")
 
-                # 고객유형(클러스터)
                 cluster_raw = None
                 if "BehaviorClusterName" in df.columns:
                     cluster_raw = row.get("BehaviorClusterName")
@@ -1001,7 +992,6 @@ with tabs[1]:
 
                 customer_type = _clean_cluster_name(cluster_raw)
 
-                # 이탈 신호 플래그
                 has_flags = all(c in df.columns for c in ["Both_ChurnFlag", "IF_ChurnFlag", "AE_ChurnFlag"])
                 both = int(row.get("Both_ChurnFlag", 0)) if has_flags else 0
                 if_flag = int(row.get("IF_ChurnFlag", 0)) if has_flags else 0
@@ -1043,8 +1033,6 @@ with tabs[1]:
                     unsafe_allow_html=True,
                 )
 
-                # ==== 기본 특성 요약 테이블 ====
-                # 표시 순서 (관리자 관점에서 의미 있는 순서)
                 fields_order = [
                     "CustomerID_clean",
                     "GenderLabel",
@@ -1074,7 +1062,7 @@ with tabs[1]:
                         if isinstance(val, (int, np.integer)):
                             disp = int(val)
                         elif isinstance(val, (float, np.floating)):
-                            # 소수점 반올림해서 정수로 표시
+                            
                             disp = int(round(float(val)))
                         else:
                             disp = val

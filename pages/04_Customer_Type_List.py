@@ -1,5 +1,3 @@
-# pages/04_Customer_Type_List.py
-# -*- coding: utf-8 -*-
 import os
 import sqlite3
 from urllib.parse import quote, unquote
@@ -15,10 +13,6 @@ DETAIL_PAGE_SLUG = "Customer_Detail"
 ACTIONS_LOOKBACK_DAYS = 7
 ACTIONS_BENEFIT_KEYWORDS = ["쿠폰", "혜택", "VIP"]
 
-
-# -------------------------------
-# Query-param helpers 
-# -------------------------------
 def qp_get(name: str):
     try:
         v = st.query_params.get(name)
@@ -36,10 +30,6 @@ def qp_set(**kwargs):
     except Exception:
         st.experimental_set_query_params(**kwargs)
 
-
-# -------------------------------
-# Gender label helpers (대시보드와 동일한 톤)
-# -------------------------------
 DEFAULT_CODE_TO_LABEL_KO = {
     1: "여성",
     3: "남성",
@@ -53,18 +43,15 @@ DEFAULT_CODE_TO_LABEL_KO = {
 def ensure_gender_label(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
-    # 이미 문자열 라벨이면 그대로(결측만 보완)
     if "GenderLabel" in out.columns and not pd.api.types.is_numeric_dtype(out["GenderLabel"]):
         out["GenderLabel"] = out["GenderLabel"].fillna("미상").astype(str).replace({"nan": "미상"})
         return out
 
-    # GenderLabel이 숫자라면(0~3) → 남/여로 정규화
     if "GenderLabel" in out.columns and pd.api.types.is_numeric_dtype(out["GenderLabel"]):
         code_map = {0: "여성", 1: "여성", 2: "남성", 3: "남성"}
         out["GenderLabel"] = out["GenderLabel"].map(code_map).fillna("미상")
         return out
 
-    # Gender 코드로 보완
     if "Gender" in out.columns:
         out["GenderLabel"] = out["Gender"].map(DEFAULT_CODE_TO_LABEL_KO).fillna("미상")
     else:
@@ -76,7 +63,6 @@ def ensure_customer_id_clean(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
     if "CustomerID_clean" in out.columns:
-        # 결측만 보완
         mask_bad = out["CustomerID_clean"].isna() | out["CustomerID_clean"].astype(str).str.strip().eq("")
         if mask_bad.any():
             fallback = pd.Series(np.arange(1, len(out) + 1), index=out.index).map(lambda i: f"CUST{i:05d}")
@@ -167,9 +153,6 @@ def load_actions():
     return adf
 
 
-# -------------------------------
-# Data load
-# -------------------------------
 df = load_main()
 if df is None or df.empty:
     st.error("메인 데이터(ecommerce_customer_churn_hybrid_with_id.csv)를 불러오지 못했습니다. 파일 경로/이름을 확인하세요.")
@@ -177,7 +160,6 @@ if df is None or df.empty:
 
 actions_df = load_actions()
 
-# 고객유형 컬럼 준비
 cluster_col = "BehaviorClusterName" if "BehaviorClusterName" in df.columns else ("BehaviorCluster" if "BehaviorCluster" in df.columns else None)
 if not cluster_col:
     st.error("고객유형(클러스터) 컬럼이 없습니다. BehaviorClusterName 또는 BehaviorCluster가 필요합니다.")
@@ -185,9 +167,6 @@ if not cluster_col:
 
 df["고객유형"] = df[cluster_col].map(clean_customer_type)
 
-# -------------------------------
-# Header
-# -------------------------------
 try:
     st.page_link("app_enhanced.py", label="← 대시보드로", icon="🏠")
 except Exception:
@@ -221,16 +200,12 @@ if not actions_df.empty:
     benefit_mask = recent["action"].fillna("").str.contains("|".join(ACTIONS_BENEFIT_KEYWORDS), case=False, na=False)
     benefit_ids = set(recent.loc[benefit_mask, "customer_id"].dropna().astype(str))
 
-# -------------------------------
-# Group slice + summary metrics
-# -------------------------------
 gdf = df[df["고객유형"] == sel_type].copy()
 if "ChurnRiskScore" in gdf.columns:
     gdf["이탈 위험 점수(0~100)"] = compute_risk_score_100(gdf["ChurnRiskScore"])
 else:
     gdf["이탈 위험 점수(0~100)"] = np.nan
 
-# 고신뢰 이탈 플래그(가능하면 Both_* 우선)
 flag_col = None
 for cand in ["Both_ChurnFlag_dyn", "Both_ChurnFlag", "Both_ChurnFlagProxy"]:
     if cand in gdf.columns:
@@ -248,9 +223,6 @@ c2.metric("고신뢰 이탈 비율", f"{(gdf['고신뢰 이탈'].mean() * 100.0 
 c3.metric("평균 이탈 위험(0~100)", "-" if gdf["이탈 위험 점수(0~100)"].isna().all() else f"{gdf['이탈 위험 점수(0~100)'].mean():.0f}")
 c4.metric("최근 7일 연락 없음", f"{int((~gdf['최근 7일 연락']).sum()):,}명")
 
-# -------------------------------
-# 전체 대비 차이
-# -------------------------------
 key_cols = [
     ("PurchaseFrequency", "구매 빈도", "↓ 낮을수록 위험"),
     ("CSFrequency", "상담 빈도", "↑ 높을수록 위험"),
@@ -287,10 +259,6 @@ if rows:
 else:
     st.caption("비교할 수 있는 핵심 지표가 부족합니다.")
 
-
-# -------------------------------
-# 고객 목록
-# -------------------------------
 st.markdown("#### 📋 고객 리스트")
 
 f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
@@ -319,7 +287,6 @@ try:
 except Exception:
     pass
 
-# 표시 컬럼 구성
 out = pd.DataFrame({
     "고객ID": view_df["CustomerID_clean"].astype(str),
     "성별": view_df.get("GenderLabel", "미상"),
@@ -332,13 +299,12 @@ out = pd.DataFrame({
     "고신뢰 이탈": view_df["고신뢰 이탈"].map({True: "예", False: "아니오"}),
 })
 
-# 리피트/프리미엄 
+
 if "리피트/프리미엄" in out.columns:
     out["리피트/프리미엄"] = out["리피트/프리미엄"].map(lambda x: "예" if str(x) == "1" else "아니오")
 
 out["상세"] = out["고객ID"].map(lambda cid: f"/{DETAIL_PAGE_SLUG}?customer_id={quote(str(cid))}")
 
-# 위험 점수 높은 순
 if "이탈 위험 점수(0~100)" in out.columns:
     out = out.sort_values("이탈 위험 점수(0~100)", ascending=False, na_position="last")
 

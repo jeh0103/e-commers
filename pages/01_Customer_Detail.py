@@ -54,8 +54,8 @@ def qp_get(name: str):
 # -------------------------------
 # Gender label helpers
 # -------------------------------
-GENDER_CODE_MAP_PATH = "gender_code_map.json"   # 코드→라벨(기본값 보완/일괄 지정)
-GENDER_LABEL_MAP_PATH = "gender_label_map.json" # 관리자 커스텀 라벨 저장(코드→라벨)
+GENDER_CODE_MAP_PATH = "gender_code_map.json"  
+GENDER_LABEL_MAP_PATH = "gender_label_map.json"
 
 DEFAULT_CODE_TO_LABEL_KO = {
     1: "여성",
@@ -107,7 +107,6 @@ def ensure_gender_label(df: pd.DataFrame,
     """
     out = df.copy()
 
-    # 1) 원본 문자열 조인
     if os.path.exists(original_csv_path):
         try:
             raw = pd.read_csv(original_csv_path, usecols=["CustomerID", "Gender"])
@@ -118,7 +117,6 @@ def ensure_gender_label(df: pd.DataFrame,
     else:
         out["GenderLabel_from_raw"] = np.nan
 
-    # 2) 코드→라벨 맵 구성
     code_map = DEFAULT_CODE_TO_LABEL_KO.copy()
     code_json = _load_json(GENDER_CODE_MAP_PATH)
     if code_json:
@@ -138,13 +136,11 @@ def ensure_gender_label(df: pd.DataFrame,
         except Exception:
             pass
 
-    # 숫자 코드에서 라벨 생성
     if "Gender" in out.columns:
         label_from_code = out["Gender"].map(code_map)
     else:
         label_from_code = pd.Series(index=out.index, dtype="object")
 
-    # 최종 라벨
     out["GenderLabel"] = out["GenderLabel_from_raw"].fillna(label_from_code)
     out.drop(columns=["GenderLabel_from_raw"], inplace=True)
     out["GenderLabel"] = out["GenderLabel"].fillna("미상")

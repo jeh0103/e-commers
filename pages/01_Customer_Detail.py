@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -174,7 +173,6 @@ def load_main():
             fallback = pd.Series(np.arange(1, len(df) + 1), index=df.index).map(lambda i: f"CUST{i:05d}")
             df.loc[mask_bad, "CustomerID_clean"] = fallback.loc[mask_bad]
 
-    # 성별 라벨 보장
     df = ensure_gender_label(df)
     return df
 
@@ -329,7 +327,6 @@ with colR:
         "EmailEngagementRate","TotalEngagementScore","RecencyProxy"
     ]
     feat_cols = [c for c in feature_candidates if exists(c)]
-    # 컬럼 이름 → 한글 라벨로 변환
     feat_pairs = [(col_label(c), row[c]) for c in feat_cols]
     st.table(kv_table(feat_pairs))
 
@@ -579,7 +576,7 @@ if driver_cols and exists("Both_ChurnFlag"):
                 a = 0.65
             elif v == "보통":
                 a = 0.40
-            else:  # 작음
+            else:  
                 a = 0.15
             styles.append(f"background-color: rgba(255,0,0,{a:.2f})")
         return styles
@@ -596,7 +593,7 @@ else:
     st.info("드라이버 분석을 위한 컬럼/정상군 기준이 부족합니다.")
 
 # -------------------------------
-# 📬 맞춤 문자 생성 / 발송 (개선본)
+# 📬 맞춤 문자 생성 / 발송
 # -------------------------------
 st.markdown("---")
 st.subheader("📨 맞춤 문자 생성/발송")
@@ -886,7 +883,7 @@ with st.expander("☁️ Twilio 설정(선택: 설정 시 실제 발송)", expan
             st.error("SID/Token/발신(or MSID)/수신번호/메시지를 모두 입력하세요.")
         else:
             try:
-                from twilio.rest import Client  # type: ignore
+                from twilio.rest import Client 
                 tw = Client(tw_sid, tw_token)
                 if msid:
                     m = tw.messages.create(body=msg, to=to_phone, messaging_service_sid=msid)

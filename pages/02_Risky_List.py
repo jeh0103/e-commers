@@ -23,7 +23,6 @@ KOR_COL = {
     "TotalEngagementScore": "총 활동 점수",
     "ChurnRiskScore": "이탈 위험 점수",
     "RepeatAndPremiumFlag": "리피트/프리미엄 여부",
-    # 내부적으로만 사용하는 모델 점수(화면 표에서는 숨김)
     "IF_AnomalyScore": "IF 이상치점수",
     "AE_ReconError": "AE 재구성오차",
 }
@@ -31,7 +30,6 @@ KOR_COL = {
 def rename_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={c: KOR_COL.get(c, c) for c in df.columns})
 
-# ===== 성별 라벨 보장 =====
 DEFAULT_CODE_TO_LABEL_KO = {1:"여성",3:"남성",5:"응답거부",4:"기타/미상",2:"남성",0:"여성"}
 
 def _normalize_gender_text_to_label_ko(x) -> str:
@@ -70,12 +68,10 @@ def ensure_gender_label(df_hybrid: pd.DataFrame,
     df["GenderLabel"] = df["GenderLabel"].fillna("미상")
     return df
 
-# ===== 데이터 로딩 =====
 @st.cache_data(show_spinner=False)
 def load_main():
     df = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
 
-    # CustomerID_clean 보장
     def _clean_id(x):
         if pd.isna(x):
             return np.nan
@@ -98,7 +94,6 @@ def load_main():
     return df
 df = load_main()
 
-# ===== 전역 필터/임계값 세션 값 재사용 =====
 sel_age = st.session_state.get("sel_age")
 sel_gender_labels = st.session_state.get("sel_gender_labels", [])
 premium_opt = st.session_state.get("premium_opt", "전체")
@@ -106,7 +101,6 @@ use_dynamic = bool(st.session_state.get("use_dynamic", False))
 if_thr = st.session_state.get("if_thr")
 ae_thr = st.session_state.get("ae_thr")
 
-# 필터 적용
 filtered = df.copy()
 if sel_age:
     filtered = filtered[(filtered["Age"] >= sel_age[0]) & (filtered["Age"] <= sel_age[1])]
@@ -115,12 +109,10 @@ if sel_gender_labels:
 if "RepeatAndPremiumFlag" in filtered.columns and premium_opt != "전체":
     filtered = filtered[filtered["RepeatAndPremiumFlag"] == (1 if str(premium_opt).startswith("예") else 0)]
 
-# ===== 파라미터: src (if|ae|both) =====
 src = st.query_params.get("src", "both") if hasattr(st, "query_params") \
       else st.experimental_get_query_params().get("src", ["both"])[0]
 src = (src if isinstance(src, str) else src[0]).lower()
 
-# ===== 상단 네비 =====
 try:
     st.page_link("app_enhanced.py", label="⬅️ 대시보드로", icon="🏠")
 except Exception:
@@ -133,7 +125,6 @@ TITLE = {
 }
 st.title(f"🗂️ {TITLE.get(src, '고객 리스트')}")
 
-# ===== 판단 기준/기본 설정 =====
 if src == "if":
     flag_col = "IF_ChurnFlag_dyn" if (use_dynamic and "IF_ChurnFlag_dyn" in filtered.columns) else "IF_ChurnFlag"
     sort_metric = "IF_AnomalyScore" if "IF_AnomalyScore" in filtered.columns else "ChurnRiskScore"
@@ -167,7 +158,6 @@ else:
         "- 아래 목록은 고신뢰군 중 **이탈위험점수**가 높은 순으로 정렬합니다."
     )
 
-# ===== 스냅샷 패널 =====
 colA, colB, colC = st.columns(3)
 target_n = int(len(subset))
 total_n = int(len(filtered)) if len(filtered) else 1
@@ -188,7 +178,7 @@ if sort_metric in filtered.columns:
         f"{delta_pct:+.1f}% vs 전체"
     )
 
-# ===== 한글 폰트 자동 설정 (그래프용) =====
+# ===== 한글 폰트 자동 설정 =====
 def _set_korean_font_if_available():
     try:
         import matplotlib.pyplot as plt
@@ -206,7 +196,6 @@ def _set_korean_font_if_available():
     except Exception:
         pass
 
-# ===== (선택) 그래프 보기 + 자동 해석 =====
 show_plot = st.toggle("그래프 보기(선택)", value=False)
 if show_plot and (sort_metric in filtered.columns):
     try:
@@ -280,8 +269,6 @@ if show_plot and (sort_metric in filtered.columns):
 
 st.markdown("---")
 
-# ===== 위험도 순 리스트 (리스크 요인 태그 + 우선 연락도 지표)
-# 정렬 및 순위점수 생성
 if sort_metric in subset.columns:
     subset = subset.sort_values(sort_metric, ascending=False)
     subset["__rank_score__"] = subset[sort_metric]
@@ -291,7 +278,6 @@ elif "ChurnRiskScore" in subset.columns:
 else:
     subset["__rank_score__"] = 0.0
 
-# 고객ID 결측 제거
 if "CustomerID_clean" in subset.columns:
     subset = subset[subset["CustomerID_clean"].notna()]
 elif "CustomerID" in subset.columns:
@@ -299,7 +285,6 @@ elif "CustomerID" in subset.columns:
 
 top_k = st.slider("표시 건수", min_value=10, max_value=500, value=100, step=10)
 
-# 리스크 태그 기준(분위) 계산 — 전체(필터적용 후) 분포 기준
 def qdict(series):
     s = pd.to_numeric(series, errors="coerce").dropna()
     if s.empty: return None
@@ -368,7 +353,6 @@ for _, r in top_sub.iterrows():
 top_sub["__tags_html__"] = html_tags
 top_sub["__tags_text__"] = text_tags
 
-# ===== 우선 연락도(0-100) 계산 (5~95 분위 기준 정규화)
 def _priority_index_from_quantiles(ref_series: pd.Series, values: pd.Series,
                                    q_low=0.05, q_high=0.95) -> pd.Series:
     ref = pd.to_numeric(ref_series, errors="coerce")
@@ -390,7 +374,6 @@ if sort_metric in filtered.columns:
 else:
     top_sub["__priority_idx__"] = 0
 
-# 우선 연락도 HTML(막대+배지) 생성
 def _priority_tier(idx: float):
     if idx >= 90: return "최우선", "rb-red"
     if idx >= 70: return "높음", "rb-orange"
@@ -406,7 +389,6 @@ def _mk_priority_html(idx: float, raw: float, thr: float | None):
     if thr is not None and np.isfinite(thr):
         tip += f" | 임계 {float(thr):.4f}"
 
-    # ✅ 배지 하나만 렌더링 (최우선/높음/보통/후순위)
     return f"<span class='rbadge {css}' title='{tip}'>{label}</span>"
 
 top_sub["__priority_html__"] = [
@@ -418,7 +400,7 @@ top_sub["__priority_html__"] = [
     for i, idx in enumerate(top_sub["__priority_idx__"])
 ]
 
-# ===== 표 구성 (관리자 친화)
+# ===== 표 구성 
 desired = [
     "CustomerID_clean",
     "GenderLabel",
@@ -443,7 +425,6 @@ if view_df.empty:
     st.info("현재 조건에서 표시할 고객이 없습니다.")
     st.stop()
 
-# 순번 + 상세 링크 + 리스크 요인 + 우선 연락도(HTML)
 view_df.insert(0, "", np.arange(1, len(view_df) + 1))
 view_df["고객ID"] = top_sub["CustomerID_clean"].apply(
     lambda cid: f"<a href='/Customer_Detail?customer_id={quote(str(cid))}' target='_self'>{cid}</a>"
@@ -451,16 +432,13 @@ view_df["고객ID"] = top_sub["CustomerID_clean"].apply(
 view_df["리스크요인"] = top_sub["__tags_html__"]
 view_df["우선 연락도"] = top_sub["__priority_html__"]
 
-# 불필요한 내부 컬럼 제거 및 라벨링
 view_df.drop(columns=["CustomerID_clean","__priority_html__","__priority_idx__"], inplace=True, errors="ignore")
 view_df = rename_for_display(view_df)
 
-# 표 표시 순서: 순위 → 고객ID → 우선 연락도 → 리스크요인 → 나머지
 display_cols = ["", "고객ID", "우선 연락도", "리스크요인"] + [
     c for c in view_df.columns if c not in ("","고객ID","우선 연락도","리스크요인")
 ]
 
-# 숫자 포맷
 age_label = KOR_COL.get("Age", "Age")
 clv_label = KOR_COL.get("CustomerLifetimeValue", "CustomerLifetimeValue")
 tp_label  = KOR_COL.get("TotalPurchases", "TotalPurchases")
@@ -554,7 +532,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ===== CSV 다운로드 (태그=텍스트, 우선 연락도/원점수 포함) =====
 export_df = view_df.copy()
 export_df.rename(columns={"": "순위"}, inplace=True)
 export_df.insert(1, "CustomerID", export_df["고객ID"].str.extract(r'>(.*?)<')[0])

@@ -653,7 +653,6 @@ with tabs[0]:
                 html_v = styler_v.to_html(escape=False)
                 st.markdown(f"<div class='today-summary-wrap'>{html_v}</div>", unsafe_allow_html=True)
 
-    # KPI-구분선-제목 사이 여백 조정 (줄을 위로, 제목과는 여백 확보)
     st.markdown(
         "<hr style='margin-top:8px; margin-bottom:22px; opacity:0.22;'>",
         unsafe_allow_html=True

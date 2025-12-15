@@ -163,30 +163,32 @@ def table_css():
       overflow-y: hidden;
     }
 
-    /* 테이블은 내용 길이에 맞게 가로로 늘어나도록 */
-    #vip_table, #pot_table {
+    /* ✅ 테이블은 내용 길이에 맞게 가로로 늘어나도록
+       (pandas Styler는 table id가 매번 바뀌어 #vip_table/#pot_table 선택자가 안 먹을 수 있어 wrapper 기준으로 적용) */
+    .vip-table-wrap table {
       border-collapse: collapse;
-      width: max-content;          /* 내용 기준으로 폭 결정 */
-      table-layout: auto;
+      width: max-content;
+      table-layout: auto !important;
     }
 
-    /* 기본 셀 스타일 */
-    #vip_table th, #vip_table td,
-    #pot_table th, #pot_table td {
+    /* ✅ 기본 셀 스타일: 줄바꿈 방지 + 기본 칸 넓이 확보 */
+    .vip-table-wrap th, .vip-table-wrap td {
       padding: 10px 12px !important;
       line-height: 1.45;
       vertical-align: middle;
-      white-space: nowrap;
+      white-space: nowrap !important;  /* 헤더/값 줄바꿈 방지 */
       word-break: keep-all;
+      max-width: none !important;
+      overflow: visible !important;
+      text-overflow: clip !important;
+      min-width: 100px !important;     /* ✅ 기본 칸 넓이(필요하면 조정) */
     }
 
-    /* 긴 텍스트가 들어가는 마지막 컬럼(추천전략/추천혜택)은
+    /* 긴 텍스트가 들어가는 마지막 컬럼(추천전략/추천혜택/근거요약)은
        칸을 넓게 잡고 줄바꿈을 허용 */
-    #pot_table th:last-child,
-    #pot_table td:last-child,
-    #vip_table th:last-child,
-    #vip_table td:last-child {
-      min-width: 520px !important;   /* 필요하면 600~700 으로 더 키워도 됨 */
+    .vip-table-wrap th:last-child,
+    .vip-table-wrap td:last-child {
+      min-width: 720px !important;   /* 필요하면 더 키워도 됨 */
       white-space: normal !important;
       word-break: keep-all;
     }
@@ -421,7 +423,6 @@ with tabs[1]:
         fmt = {c: "{:,.0f}" for c in num_cols}
 
         styler = view[display_cols].style.hide(axis="index").format(fmt)
-        # 테이블 자체에 최소 너비를 인라인 스타일로 강제 → 가로 스크롤 보장
         html = styler.set_table_attributes(
             'id="pot_table" style="min-width: 1600px;"'
         ).to_html(escape=False)

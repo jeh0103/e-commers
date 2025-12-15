@@ -88,7 +88,6 @@ def ensure_gender_label(df_hybrid: pd.DataFrame,
 def load_data():
     base = pd.read_csv("ecommerce_customer_churn_hybrid_with_id.csv")
 
-   
     if "CustomerID" not in base.columns:
         base["CustomerID"] = [f"CUST{(i+1):05d}" for i in range(len(base))]
 
@@ -98,7 +97,6 @@ def load_data():
         return np.nan if (s=="" or s.lower() in {"nan","none","nat","null"}) else s
 
     base["CustomerID_clean"] = base["CustomerID"].map(_clean_id)
-
 
     if base["CustomerID_clean"].isna().any():
         auto_ids = pd.Series([f"CUST{(i+1):05d}" for i in range(len(base))], index=base.index)
@@ -158,19 +156,75 @@ def qv(s: pd.Series, q: int|float) -> float|None:
 def table_css():
     st.markdown("""
     <style>
-    #vip_table, #pot_table { width: 100% !important; table-layout: fixed; }
-    #vip_table th, #vip_table td, #pot_table th, #pot_table td {
-      padding: 10px 12px !important; line-height: 1.45; vertical-align: middle;
-      white-space: normal !important; word-break: keep-all;
+    /* 가로 스크롤 래퍼 */
+    .vip-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
     }
-    .badge { padding: 2px 6px; border-radius: 6px; font-size: 12px; line-height: 1;
-             background: rgba(0,0,0,0.06); }
-    .badge.gold { background: rgba(255,204,0,.18); border: 1px solid rgba(255,204,0,.35); }
-    .badge.green{ background: rgba(52,199,89,.18); border: 1px solid rgba(52,199,89,.35); }
-    .chip { display:inline-block; padding:2px 6px; background:rgba(0,0,0,.06); border-radius:6px; font-size:12px; }
-    .barwrap { display:flex; align-items:center; gap:8px; }
-    .bar    { flex:1; height:10px; background:rgba(0,0,0,0.08); border-radius:999px; overflow:hidden; }
-    .bar .fill { height:100%; background: rgba(10,132,255,0.55); }
+
+    /* 테이블은 내용 길이에 맞게 가로로 늘어나도록 */
+    #vip_table, #pot_table {
+      border-collapse: collapse;
+      width: max-content;          /* 내용 기준으로 폭 결정 */
+      table-layout: auto;
+    }
+
+    /* 기본 셀 스타일 */
+    #vip_table th, #vip_table td,
+    #pot_table th, #pot_table td {
+      padding: 10px 12px !important;
+      line-height: 1.45;
+      vertical-align: middle;
+      white-space: nowrap;
+      word-break: keep-all;
+    }
+
+    /* 긴 텍스트가 들어가는 마지막 컬럼(추천전략/추천혜택)은
+       칸을 넓게 잡고 줄바꿈을 허용 */
+    #pot_table th:last-child,
+    #pot_table td:last-child,
+    #vip_table th:last-child,
+    #vip_table td:last-child {
+      min-width: 520px !important;   /* 필요하면 600~700 으로 더 키워도 됨 */
+      white-space: normal !important;
+      word-break: keep-all;
+    }
+
+    .badge {
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1;
+      background: rgba(0,0,0,0.06);
+    }
+    .badge.gold  { background: rgba(255,204,0,.18); border: 1px solid rgba(255,204,0,.35); }
+    .badge.green { background: rgba(52,199,89,.18); border: 1px solid rgba(52,199,89,.35); }
+
+    .chip {
+      display:inline-block;
+      padding:2px 6px;
+      background:rgba(0,0,0,.06);
+      border-radius:6px;
+      font-size:12px;
+    }
+
+    .barwrap {
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .bar {
+      flex:1;
+      height:10px;
+      background:rgba(0,0,0,0.08);
+      border-radius:999px;
+      overflow:hidden;
+    }
+    .bar .fill {
+      height:100%;
+      background: rgba(10,132,255,0.55);
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -238,11 +292,9 @@ vip_linkable = 0
 if "CustomerID_clean" in vip_df_all.columns:
     vip_linkable = int(vip_df_all["CustomerID_clean"].notna().sum())
 
-
 vip_df = vip_df_all.copy()
 if "CustomerID_clean" in vip_df.columns:
     vip_df = vip_df[vip_df["CustomerID_clean"].notna()]
-
 
 scored = compute_vip_propensity_score(filtered, ref_df=filtered)
 scored_full = filtered.reset_index(drop=True).merge(
@@ -256,7 +308,6 @@ cands, snap = select_vip_candidates(
     strong_signal_pct=float(strong_signal_pct),
     include_nan_id_in_stats=bool(include_nan_id_in_stats),
 )
-
 
 tabs = st.tabs(["📌 개요", "🚀 전환 후보", "👑 현재 VIP", "ℹ️ 사용 설명"])
 
@@ -311,7 +362,7 @@ with tabs[0]:
         cB.metric("추정 비용(원)", f"{cost:,.0f}")
         cC.metric("ROI(%)", f"{roi_val:,.1f}")
 
-
+# == 전환 후보 탭 ==
 with tabs[1]:
     st.subheader("🚀 전환 후보 리스트")
     if len(cands) == 0:
@@ -349,6 +400,7 @@ with tabs[1]:
                 pct = 0
             return f"<div class='barwrap'><div class='bar'><div class='fill' style='width:{pct}%;'></div></div><span>{pct}%</span></div>"
         if "VIP잠재지수" in view.columns:
+            view["VIP잠재지수"] = pd.to_numeric(view["VIP잠재지수"], errors="coerce")
             view["VIP게이지"] = view["VIP잠재지수"].apply(bar_html)
 
         view = rename_for_display(view)
@@ -364,24 +416,16 @@ with tabs[1]:
         ]
         display_cols = safe_cols(view, base_cols)
 
-        fmt = {
-            dlabel("AverageOrderValue"): "{:,.0f}",
-            dlabel("PurchaseFrequency"): "{:.2f}",
-            dlabel("TotalEngagementScore"): "{:.2f}",
-            dlabel("EmailEngagementRate"): "{:.2f}",
-            dlabel("MobileAppUsage"): "{:.0f}",
-            dlabel("AvgPurchaseInterval"): "{:.2f}",
-            dlabel("coverage"): "{:.2f}",
-        }
+        # 숫자 컬럼은 모두 소수점 반올림해서 정수로 표시
+        num_cols = [c for c in display_cols if pd.api.types.is_numeric_dtype(view[c])]
+        fmt = {c: "{:,.0f}" for c in num_cols}
 
         styler = view[display_cols].style.hide(axis="index").format(fmt)
-        st.markdown(styler.set_table_attributes('id="pot_table"').to_html(escape=False), unsafe_allow_html=True)
-
-        st.markdown("""
-        <style>
-        #pot_table th:nth-child(1), #pot_table td:nth-child(1) { min-width: 120px; }
-        </style>
-        """, unsafe_allow_html=True)
+        # 테이블 자체에 최소 너비를 인라인 스타일로 강제 → 가로 스크롤 보장
+        html = styler.set_table_attributes(
+            'id="pot_table" style="min-width: 1600px;"'
+        ).to_html(escape=False)
+        st.markdown(f"<div class='vip-table-wrap'>{html}</div>", unsafe_allow_html=True)
 
         exp = view[display_cols].copy()
         if "고객ID" in exp.columns and "CustomerID" not in exp.columns:
@@ -392,6 +436,7 @@ with tabs[1]:
         st.download_button("⬇️ 전환 후보 CSV", exp.to_csv(index=False).encode("utf-8-sig"),
                            "vip_candidates.csv", "text/csv")
 
+# == 현재 VIP 탭 ==
 with tabs[2]:
     st.subheader("👑 현재 VIP 고객")
     if len(vip_df) == 0:
@@ -424,23 +469,15 @@ with tabs[2]:
         ]
         display_cols = safe_cols(view, base_cols)
 
-        fmt = {
-            dlabel("CustomerLifetimeValue"): "{:,.0f}",
-            dlabel("PurchaseFrequency"): "{:.2f}",
-            dlabel("AverageOrderValue"): "{:,.0f}",
-            dlabel("TotalEngagementScore"): "{:.2f}",
-            dlabel("EmailEngagementRate"): "{:.2f}",
-            dlabel("MobileAppUsage"): "{:.0f}",
-        }
+        # 숫자 컬럼 정수 표시
+        num_cols = [c for c in display_cols if pd.api.types.is_numeric_dtype(view[c])]
+        fmt = {c: "{:,.0f}" for c in num_cols}
 
         styler = view[display_cols].style.hide(axis="index").format(fmt)
-        st.markdown(styler.set_table_attributes('id="vip_table"').to_html(escape=False), unsafe_allow_html=True)
-
-        st.markdown("""
-        <style>
-        #vip_table th:nth-child(1), #vip_table td:nth-child(1) { min-width: 120px; }
-        </style>
-        """, unsafe_allow_html=True)
+        html = styler.set_table_attributes(
+            'id="vip_table" style="min-width: 1400px;"'
+        ).to_html(escape=False)
+        st.markdown(f"<div class='vip-table-wrap'>{html}</div>", unsafe_allow_html=True)
 
         exp = view[display_cols].copy()
         if "고객ID" in exp.columns and "CustomerID" not in exp.columns:
@@ -449,6 +486,7 @@ with tabs[2]:
         st.download_button("⬇️ VIP 리스트 CSV", exp.to_csv(index=False).encode("utf-8-sig"),
                            "vip_list.csv", "text/csv")
 
+# == 사용 설명 탭 ==
 with tabs[3]:
     st.subheader("ℹ️ 사용 설명")
     st.markdown("""

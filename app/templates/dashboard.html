@@ -9,29 +9,23 @@
       <button class="btn primary" type="submit">조회</button>
     </div>
   </form>
-  <div class="quick-links" aria-label="바로가기">
-    <a class="btn" href="/risky?src=both">우선 연락</a>
-    <a class="btn" href="/vip">VIP 관리</a>
-    <a class="btn" href="/customer-types">고객 유형</a>
+  <div class="crm-workbench" aria-label="오늘 처리할 업무">
+    <a class="work-item red" href="/risky?src=both">
+      <span>우선 연락 대기</span>
+      <strong>{{ summary.metrics.risky_no_contact|num }}</strong>
+    </a>
+    <a class="work-item green" href="/vip">
+      <span>혜택 제안 대기</span>
+      <strong>{{ summary.metrics.vip_no_benefit|num }}</strong>
+    </a>
+    <div class="work-item blue">
+      <span>진행 중 조치</span>
+      <strong>{{ summary.metrics.open_actions|num }}</strong>
+    </div>
   </div>
 </section>
 
 {% include "_filters.html" %}
-
-<section class="section crm-workbench">
-  <a class="work-item red" href="/risky?src=both">
-    <span>우선 연락 대기</span>
-    <strong>{{ summary.metrics.risky_no_contact|num }}</strong>
-  </a>
-  <a class="work-item green" href="/vip">
-    <span>혜택 제안 대기</span>
-    <strong>{{ summary.metrics.vip_no_benefit|num }}</strong>
-  </a>
-  <div class="work-item blue">
-    <span>진행 중 조치</span>
-    <strong>{{ summary.metrics.open_actions|num }}</strong>
-  </div>
-</section>
 
 <section class="section metric-grid">
   <a class="metric cyan" href="/api/customers">

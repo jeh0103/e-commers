@@ -256,7 +256,6 @@ a:hover {
   align-items: end;
 }
 
-.dashboard-actions,
 .control-panel,
 .control-strip {
   border: 1px solid var(--line);
@@ -267,11 +266,9 @@ a:hover {
 
 .dashboard-actions {
   display: grid;
-  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
-  gap: 14px;
-  align-items: end;
-  margin-bottom: 14px;
-  padding: 14px;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
 }
 
 .crm-workbench {
@@ -332,7 +329,14 @@ a.work-item:hover {
 
 .quick-search {
   display: grid;
+  align-content: center;
   gap: 6px;
+  min-height: 76px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .quick-search label {
@@ -352,6 +356,10 @@ a.work-item:hover {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.dashboard-actions + .filter-panel {
+  margin-top: 14px;
 }
 
 .control-panel {
@@ -1175,7 +1183,6 @@ a.metric:hover {
 }
 
 @media (max-width: 1120px) {
-  .dashboard-actions,
   .vip-rule-form,
   .list-toolbar,
   .control-strip {
@@ -1255,8 +1262,8 @@ a.metric:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .crm-workbench {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .dashboard-actions {
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
   }
 
   .compact-metrics .metric {
@@ -1288,6 +1295,31 @@ a.metric:hover {
 
   .vip-rule-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dashboard-actions {
+    grid-template-columns: minmax(208px, 1.35fr) minmax(0, 2.65fr);
+    gap: 8px;
+  }
+
+  .quick-search,
+  .work-item {
+    min-height: 78px;
+  }
+
+  .quick-search {
+    padding: 12px;
+  }
+
+  .work-item {
+    grid-template-columns: 1fr;
+    align-content: center;
+    gap: 6px;
+    padding: 12px 12px 12px 14px;
+  }
+
+  .work-item strong {
+    font-size: 24px;
   }
 
   .list-toolbar {
@@ -1362,6 +1394,10 @@ a.metric:hover {
 
   .quick-links .btn {
     flex: 1 1 120px;
+  }
+
+  .dashboard-actions {
+    grid-template-columns: 1fr;
   }
 
   .crm-workbench {

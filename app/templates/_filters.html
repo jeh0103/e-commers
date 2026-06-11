@@ -1,0 +1,57 @@
+<form class="filter-panel" method="get" action="{{ filter_action or path }}">
+  {% if hidden_fields %}
+    {% for name, value in hidden_fields.items() %}
+      <input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% endfor %}
+  {% endif %}
+  <div class="filter-title">
+    <strong>고객 필터</strong>
+  </div>
+  <div class="filter-grid">
+    <div class="field">
+      <label for="age_min">최소 나이</label>
+      <input id="age_min" type="number" name="age_min" value="{{ filters.age_min if filters.age_min is not none else '' }}">
+    </div>
+    <div class="field">
+      <label for="age_max">최대 나이</label>
+      <input id="age_max" type="number" name="age_max" value="{{ filters.age_max if filters.age_max is not none else '' }}">
+    </div>
+    <div class="field filter-wide">
+      <span class="check-label">성별</span>
+      <div class="checks">
+        {% for gender in options.genders %}
+          <label class="check">
+            <input type="checkbox" name="gender" value="{{ gender }}" {{ 'checked' if gender in filters.genders else '' }}>
+            <span>{{ gender }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="field">
+      <label for="premium">우수고객 여부</label>
+      <select id="premium" name="premium">
+        <option value="all" {{ 'selected' if filters.premium == 'all' else '' }}>전체</option>
+        <option value="yes" {{ 'selected' if filters.premium == 'yes' else '' }}>예</option>
+        <option value="no" {{ 'selected' if filters.premium == 'no' else '' }}>아니오</option>
+      </select>
+    </div>
+    <div class="field">
+      <span class="check-label">자동 기준</span>
+      <label class="check">
+        <input type="checkbox" name="use_dynamic" value="1" {{ 'checked' if filters.use_dynamic else '' }}>
+        <span>적용</span>
+      </label>
+    </div>
+    <div class="field">
+      <label for="if_threshold">이상 행동 기준</label>
+      <input id="if_threshold" type="number" step="0.0001" name="if_threshold" placeholder="{{ options.if_q95|num(4) }}" value="{{ filters.if_threshold if filters.if_threshold is not none else '' }}">
+    </div>
+    <div class="field">
+      <label for="ae_threshold">패턴 변화 기준</label>
+      <input id="ae_threshold" type="number" step="0.0001" name="ae_threshold" placeholder="{{ options.ae_q95|num(4) }}" value="{{ filters.ae_threshold if filters.ae_threshold is not none else '' }}">
+    </div>
+  </div>
+  <div>
+    <button class="btn primary" type="submit">필터 적용</button>
+  </div>
+</form>

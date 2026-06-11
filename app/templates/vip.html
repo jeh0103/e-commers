@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% set filter_action = "/vip" %}
+{% block content %}
+{% include "_filters.html" %}
+
+<section class="section vip-control-panel">
+  <form class="vip-rule-form" method="get" action="/vip">
+    <div class="vip-rule-grid">
+      <div class="field">
+        <label for="mode">후보 선택 방식</label>
+        <select id="mode" name="mode">
+          <option value="threshold" {{ 'selected' if params.mode == 'threshold' else '' }}>점수로 선택</option>
+          <option value="topk" {{ 'selected' if params.mode == 'topk' else '' }}>상위 인원</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="threshold">VIP 점수</label>
+        <input id="threshold" type="number" name="threshold" min="0" max="100" value="{{ params.threshold|num }}">
+      </div>
+      <div class="field">
+        <label for="topk">상위 인원</label>
+        <input id="topk" type="number" name="topk" min="10" max="1000" step="10" value="{{ params.topk }}">
+      </div>
+      <div class="field">
+        <label for="coverage_min_n">최소 정보 수</label>
+        <input id="coverage_min_n" type="number" name="coverage_min_n" min="1" max="9" value="{{ params.coverage_min_n }}">
+      </div>
+      <div class="field">
+        <label for="strong_signal_pct">강점 항목 기준</label>
+        <input id="strong_signal_pct" type="number" name="strong_signal_pct" min="80" max="99" value="{{ params.strong_signal_pct|num }}">
+      </div>
+      <div class="field">
+        <label for="clv_q">고객 가치 범위</label>
+        <input id="clv_q" type="number" name="clv_q" min="70" max="99" value="{{ params.clv_q|num }}">
+      </div>
+      <div class="field">
+        <label for="pf_q">구매빈도 범위</label>
+        <input id="pf_q" type="number" name="pf_q" min="60" max="95" value="{{ params.pf_q|num }}">
+      </div>
+      <div class="field">
+        <label for="logic">현재 VIP 기준</label>
+        <select id="logic" name="logic">
+          <option value="and" {{ 'selected' if params.logic == 'and' else '' }}>둘 다 만족</option>
+          <option value="or" {{ 'selected' if params.logic == 'or' else '' }}>둘 중 하나</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="limit">표시 건수</label>
+        <input id="limit" type="number" name="limit" min="10" max="1000" step="10" value="{{ params.limit }}">
+      </div>
+    </div>
+    <div class="vip-rule-actions">
+      <button class="btn primary" type="submit">조건 적용</button>
+      <a class="btn" href="/api/vip-candidates.csv?limit={{ params.limit }}">목록 다운로드</a>
+    </div>
+  </form>
+</section>
+
+<section class="section metric-grid compact-metrics">
+  <div class="metric green">
+    <div class="metric-label">전환 후보 수</div>
+    <div class="metric-value">{{ result.metrics.candidate_count|num }}</div>
+  </div>
+  <div class="metric cyan">
+    <div class="metric-label">현재 VIP 수</div>
+    <div class="metric-value">{{ result.metrics.current_vip_count|num }}</div>
+  </div>
+  <div class="metric amber">
+    <div class="metric-label">예상 전환 성공률</div>
+    <div class="metric-value">{{ (result.metrics.precision_at_k * 100)|pct(1) }}</div>
+  </div>
+  <div class="metric violet">
+    <div class="metric-label">선별 효율</div>
+    <div class="metric-value">{{ result.metrics.lift_at_k|num(2) }}배</div>
+    <div class="metric-note">예상 이익 {{ result.metrics.roi_total|num }}원</div>
+  </div>
+</section>
+
+<section class="section section-card">
+  <div class="section-card-header">
+    <div>
+      <h2 class="section-title">전환 후보</h2>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table key-table rank-table">
+      <thead>
+        <tr>
+          <th>순위</th>
+          <th>고객ID</th>
+          <th>VIP 점수</th>
+          <th>신뢰도</th>
+          <th class="num">고객 가치</th>
+          <th class="num">구매 빈도</th>
+          <th class="num">평균 주문금액</th>
+          <th class="num">참여 점수</th>
+          <th>추천 전략</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result.candidates %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td class="main-link"><a href="/customers/{{ row.CustomerID_clean }}">{{ row.CustomerID_clean }}</a></td>
+            <td>
+              <div class="bar-cell">
+                <div class="bar"><span style="width: {{ row['VIP잠재지수'] or 0 }}%;"></span></div>
+                <strong>{{ row['VIP잠재지수']|num }}</strong>
+              </div>
+            </td>
+            <td><span class="badge green">{{ row.CoverageLabel }}</span></td>
+            <td class="num">{{ row.CustomerLifetimeValue|num }}</td>
+            <td class="num">{{ row.PurchaseFrequency|num(2) }}</td>
+            <td class="num">{{ row.AverageOrderValue|num }}</td>
+            <td class="num">{{ row.TotalEngagementScore|num(2) }}</td>
+            <td>{{ row.Recommendation }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9">현재 조건에서 후보가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section section-card">
+  <div class="section-card-header">
+    <div>
+      <h2 class="section-title">현재 VIP</h2>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table key-table">
+      <thead>
+        <tr>
+          <th>고객ID</th>
+          <th class="num">고객 가치</th>
+          <th class="num">구매 빈도</th>
+          <th class="num">평균 주문금액</th>
+          <th class="num">참여 점수</th>
+          <th>추천 혜택</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result.current_vip %}
+          <tr>
+            <td class="main-link"><a href="/customers/{{ row.CustomerID_clean }}">{{ row.CustomerID_clean }}</a></td>
+            <td class="num">{{ row.CustomerLifetimeValue|num }}</td>
+            <td class="num">{{ row.PurchaseFrequency|num(2) }}</td>
+            <td class="num">{{ row.AverageOrderValue|num }}</td>
+            <td class="num">{{ row.TotalEngagementScore|num(2) }}</td>
+            <td>{{ row.Recommendation }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6">현재 조건에서 VIP 고객이 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

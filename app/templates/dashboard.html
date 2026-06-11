@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% set filter_action = "/" %}
+{% block content %}
+<section class="dashboard-actions">
+  <form data-customer-search class="quick-search">
+    <label for="dashboard_customer_id">고객 조회</label>
+    <div class="search-control">
+      <input id="dashboard_customer_id" type="text" name="customer_id" placeholder="CUST00001" aria-label="고객ID 검색">
+      <button class="btn primary" type="submit">조회</button>
+    </div>
+  </form>
+  <div class="quick-links" aria-label="바로가기">
+    <a class="btn" href="/risky?src=both">우선 연락</a>
+    <a class="btn" href="/vip">VIP 관리</a>
+    <a class="btn" href="/customer-types">고객 유형</a>
+  </div>
+</section>
+
+{% include "_filters.html" %}
+
+<section class="section crm-workbench">
+  <a class="work-item red" href="/risky?src=both">
+    <span>우선 연락 대기</span>
+    <strong>{{ summary.metrics.risky_no_contact|num }}</strong>
+  </a>
+  <a class="work-item green" href="/vip">
+    <span>혜택 제안 대기</span>
+    <strong>{{ summary.metrics.vip_no_benefit|num }}</strong>
+  </a>
+  <div class="work-item blue">
+    <span>진행 중 조치</span>
+    <strong>{{ summary.metrics.open_actions|num }}</strong>
+  </div>
+</section>
+
+<section class="section metric-grid">
+  <a class="metric cyan" href="/api/customers">
+    <div class="metric-label">총 고객 수</div>
+    <div class="metric-value">{{ summary.metrics.total|num }}</div>
+  </a>
+  <a class="metric amber" href="/risky?src=if">
+    <div class="metric-label">이상 행동 고객</div>
+    <div class="metric-value">{{ summary.metrics.churn_if|num }}</div>
+  </a>
+  <a class="metric violet" href="/risky?src=ae">
+    <div class="metric-label">패턴 변화 고객</div>
+    <div class="metric-value">{{ summary.metrics.churn_ae|num }}</div>
+  </a>
+  <a class="metric red" href="/risky?src=both">
+    <div class="metric-label">우선 관리 고객</div>
+    <div class="metric-value">{{ summary.metrics.churn_both|num }}</div>
+    <div class="metric-note"><strong>{{ summary.metrics.churn_both_rate|pct(2) }}</strong> 전체 대비</div>
+  </a>
+</section>
+
+<section class="section split">
+  <div class="section-card">
+    <div class="section-card-header">
+      <div>
+        <h2 class="section-title">우선 연락 대상</h2>
+      </div>
+      <a class="btn ghost" href="/risky?src=both">전체 보기</a>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table compact">
+        <thead>
+          <tr>
+            <th>고객ID</th>
+            <th>위험</th>
+            <th class="num">점수</th>
+            <th>요인</th>
+            <th class="num">구매</th>
+            <th class="num">상담</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.risky_priority %}
+            <tr>
+              <td class="main-link"><a href="/customers/{{ row.CustomerID_clean }}">{{ row.CustomerID_clean }}</a></td>
+              <td><span class="badge red">{{ row.RiskLevel }}</span></td>
+              <td class="num">{{ row.RiskScore100|num }}</td>
+              <td>
+                <span class="tag-list">
+                  {% for tag in row.RiskTags %}
+                    <span class="badge amber">{{ tag }}</span>
+                  {% endfor %}
+                </span>
+              </td>
+              <td class="num">{{ row.PurchaseFrequency|num(2) }}</td>
+              <td class="num">{{ row.CSFrequency|num(2) }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6">표시할 고객이 없습니다.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="section-card">
+    <div class="section-card-header">
+      <div>
+        <h2 class="section-title">혜택 제안 대기</h2>
+      </div>
+      <a class="btn ghost" href="/vip">후보 보기</a>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table compact">
+        <thead>
+          <tr>
+            <th>고객ID</th>
+            <th>VIP 점수</th>
+            <th class="num">고객 가치</th>
+            <th class="num">구매 빈도</th>
+            <th class="num">평균 주문금액</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.vip_priority %}
+            <tr>
+              <td class="main-link"><a href="/customers/{{ row.CustomerID_clean }}">{{ row.CustomerID_clean }}</a></td>
+              <td>
+                <div class="bar-cell">
+                  <div class="bar"><span style="width: {{ row['VIP잠재지수'] or 0 }}%;"></span></div>
+                  <strong>{{ row['VIP잠재지수']|num }}</strong>
+                </div>
+              </td>
+              <td class="num">{{ row.CustomerLifetimeValue|num }}</td>
+              <td class="num">{{ row.PurchaseFrequency|num(2) }}</td>
+              <td class="num">{{ row.AverageOrderValue|num }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5">표시할 고객이 없습니다.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="section split">
+  <div class="section-card">
+    <div class="section-card-header">
+      <div>
+        <h2 class="section-title">고객 유형 분포</h2>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>고객 유형</th>
+            <th>고객 수</th>
+            <th>비중</th>
+            <th>평균 위험</th>
+            <th>우선 관리 비율</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.customer_types %}
+            <tr>
+              <td class="main-link"><a href="/customer-types?customer_type={{ row.CustomerType|urlencode }}">{{ row.CustomerType }}</a></td>
+              <td class="num">{{ row.customer_count|num }}</td>
+              <td class="num">{{ row.share|pct(1) }}</td>
+              <td class="num">{{ row.avg_risk|num }}</td>
+              <td class="num">{{ row.high_churn_rate|pct(1) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="section-card">
+    <div class="section-card-header">
+      <div>
+        <h2 class="section-title">우선 관리 고객</h2>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>고객ID</th>
+            <th>유형</th>
+            <th>위험</th>
+            <th>우선도</th>
+            <th>요인</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.risky_preview %}
+            <tr>
+              <td class="main-link"><a href="/customers/{{ row.CustomerID_clean }}">{{ row.CustomerID_clean }}</a></td>
+              <td>{{ row.CustomerType }}</td>
+              <td class="num">{{ row.RiskScore100|num }}</td>
+              <td><span class="badge blue">{{ row.PriorityLabel }}</span></td>
+              <td>
+                <span class="tag-list">
+                  {% for tag in row.RiskTags %}
+                    <span class="badge amber">{{ tag }}</span>
+                  {% endfor %}
+                </span>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5">표시할 고객이 없습니다.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

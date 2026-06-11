@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% set filter_action = "/customer-types" %}
+{% block content %}
+{% include "_filters.html" %}
+
+<section class="section control-panel">
+  <form class="toolbar" method="get" action="/customer-types">
+    <div class="field">
+      <label for="customer_type">고객 유형</label>
+      <select id="customer_type" name="customer_type">
+        {% for item in detail.types %}
+          <option value="{{ item }}" {{ 'selected' if item == detail.selected else '' }}>{{ item }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="q">고객ID</label>
+      <input id="q" name="q" value="{{ query.q }}" placeholder="CUST00001">
+    </div>
+    <div class="field">
+      <label for="min_risk">최소 위험 점수</label>
+      <input id="min_risk" type="number" min="0" max="100" step="5" name="min_risk" value="{{ query.min_risk|num }}">
+    </div>
+    <div class="field">
+      <label for="limit">표시 건수</label>
+      <input id="limit" type="number" min="10" max="1000" step="10" name="limit" value="{{ query.limit }}">
+    </div>
+    <div class="field">
+      <span class="check-label">조건</span>
+      <label class="check">
+        <input type="checkbox" name="only_high" value="1" {{ 'checked' if query.only_high else '' }}>
+        <span>우선 관리 고객만</span>
+      </label>
+    </div>
+    <div class="field">
+      <span class="check-label">연락</span>
+      <label class="check">
+        <input type="checkbox" name="only_no_contact" value="1" {{ 'checked' if query.only_no_contact else '' }}>
+        <span>최근 7일 연락 없음</span>
+      </label>
+    </div>
+    <button class="btn primary" type="submit">목록 갱신</button>
+  </form>
+</section>
+
+<section class="section metric-grid">
+  <div class="metric cyan">
+    <div class="metric-label">유형 고객 수</div>
+    <div class="metric-value">{{ detail.metrics.customer_count|num }}</div>
+  </div>
+  <div class="metric green">
+    <div class="metric-label">현재 목록 수</div>
+    <div class="metric-value">{{ detail.metrics.filtered_count|num }}</div>
+  </div>
+  <div class="metric red">
+    <div class="metric-label">우선 관리 비율</div>
+    <div class="metric-value">{{ detail.metrics.high_churn_rate|pct(1) }}</div>
+  </div>
+  <div class="metric amber">
+    <div class="metric-label">최근 7일 연락 없음</div>
+    <div class="metric-value">{{ detail.metrics.no_contact_count|num }}</div>
+  </div>
+</section>
+
+<section class="section three compact-drivers">
+  {% for item in detail.features %}
+    <div class="driver-card">
+      <h3>{{ item.label }}</h3>
+      <p>유형 평균 {{ item.current|num(2) }} · 전체 평균 {{ item.overall|num(2) }}</p>
+      <p>전체 대비 {{ item.delta|pct(0) }} · {{ item.direction }}</p>
+    </div>
+  {% endfor %}
+</section>
+
+<section class="section section-card">
+  <div class="section-card-header">
+    <div>
+      <h2 class="section-title">고객 목록</h2>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>고객ID</th>
+          <th>성별</th>
+          <th class="num">나이</th>
+          <th>우수고객 여부</th>
+          <th>최근 연락</th>
+          <th>최근 혜택</th>
+          <th>우선 관리 여부</th>
+          <th>위험 수준</th>
+          <th class="num">위험 점수</th>
+          <th class="num">구매 빈도</th>
+          <th class="num">상담 빈도</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in detail.rows %}
+          <tr>
+            <td class="main-link"><a href="/customers/{{ row.CustomerID_clean }}">{{ row.CustomerID_clean }}</a></td>
+            <td>{{ row.GenderLabel }}</td>
+            <td class="num">{{ row.Age|num }}</td>
+            <td>{{ '예' if row.RepeatAndPremiumFlag == 1 else '아니오' }}</td>
+            <td><span class="badge {{ 'green' if row.RecentContact else '' }}">{{ '있음' if row.RecentContact else '없음' }}</span></td>
+            <td><span class="badge {{ 'green' if row.RecentBenefit else '' }}">{{ '있음' if row.RecentBenefit else '없음' }}</span></td>
+            <td><span class="badge {{ 'red' if row.HighChurn else '' }}">{{ '예' if row.HighChurn else '아니오' }}</span></td>
+            <td>{{ row.RiskLevel }}</td>
+            <td class="num">{{ row.RiskScore100|num }}</td>
+            <td class="num">{{ row.PurchaseFrequency|num(2) }}</td>
+            <td class="num">{{ row.CSFrequency|num(2) }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="11">현재 조건에서 표시할 고객이 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

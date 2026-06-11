@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% set filter_action = "/risky" %}
+{% set hidden_fields = {"src": src, "limit": limit} %}
+{% block content %}
+{% include "_filters.html" %}
+
+<section class="section list-toolbar">
+  <div class="segmented">
+    <a href="/risky?src=both" class="{{ 'active' if src == 'both' else '' }}">우선 관리</a>
+    <a href="/risky?src=if" class="{{ 'active' if src == 'if' else '' }}">이상 행동</a>
+    <a href="/risky?src=ae" class="{{ 'active' if src == 'ae' else '' }}">패턴 변화</a>
+  </div>
+  <div class="list-count">
+    <span>대상 고객</span>
+    <strong>{{ result.total|num }}</strong>
+  </div>
+  <form class="list-toolbar-form" method="get" action="/risky">
+    <input type="hidden" name="src" value="{{ src }}">
+    <div class="field slim-field">
+      <label for="limit">표시 건수</label>
+      <input id="limit" type="number" min="10" max="500" step="10" name="limit" value="{{ limit }}">
+    </div>
+    <button class="btn primary" type="submit">목록 갱신</button>
+    <a class="btn" href="/api/risky.csv?src={{ src }}&limit={{ limit }}">목록 다운로드</a>
+  </form>
+</section>
+
+<section class="section section-card">
+  <div class="section-card-header">
+    <div>
+      <h2 class="section-title">우선 연락 목록</h2>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>순위</th>
+          <th>고객ID</th>
+          <th>연락 우선도</th>
+          <th>위험 수준</th>
+          <th class="num">위험 점수</th>
+          <th>고객 유형</th>
+          <th>리스크 요인</th>
+          <th class="num">구매 빈도</th>
+          <th class="num">상담 빈도</th>
+          <th class="num">만족도</th>
+          <th class="num">{{ result.config.metric_label }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result.rows %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td class="main-link"><a href="/customers/{{ row.CustomerID_clean }}">{{ row.CustomerID_clean }}</a></td>
+            <td>
+              <div class="bar-cell">
+                <div class="bar danger"><span style="width: {{ row.PriorityIndex or 0 }}%;"></span></div>
+                <span class="badge {{ 'red' if row.PriorityLabel == '최우선' else 'amber' if row.PriorityLabel == '높음' else 'blue' }}">{{ row.PriorityLabel }}</span>
+              </div>
+            </td>
+            <td><span class="badge red">{{ row.RiskLevel }}</span></td>
+            <td class="num">{{ row.RiskScore100|num }}</td>
+            <td>{{ row.CustomerType }}</td>
+            <td>
+              <span class="tag-list">
+                {% for tag in row.RiskTags %}
+                  <span class="badge amber">{{ tag }}</span>
+                {% endfor %}
+              </span>
+            </td>
+            <td class="num">{{ row.PurchaseFrequency|num(2) }}</td>
+            <td class="num">{{ row.CSFrequency|num(2) }}</td>
+            <td class="num">{{ row.AverageSatisfactionScore|num(2) }}</td>
+            <td class="num">{{ row[result.config.sort_col]|num(2) if row[result.config.sort_col] is defined else '-' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="11">현재 조건에서 표시할 고객이 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
